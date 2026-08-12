@@ -22,7 +22,7 @@ jobs:
           enable-cache: true
       - run: uv sync --extra dev --locked
       - run: uv run ruff check .
-      - run: uv run mypy src/pretense
+      - run: uv run mypy --python-version ${{ matrix.python-version }} src/pretense
       - run: uv run pytest --cov=pretense
       - run: uv run torchrun --standalone --nproc-per-node=2 tests/distributed/cocondenser_smoke.py
       - run: uv build --no-sources
