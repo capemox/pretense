@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Publish target
+        type: choice
+        options: [testpypi]
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'release' && 'pypi' || 'testpypi' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Verify release tag
+        if: github.event_name == 'release'
+        run: test "${GITHUB_REF_NAME}" = "v$(uv version --short)"
+      - run: uv sync --extra dev --locked
+      - run: uv run pytest
+      - run: uv build --no-sources
+      - run: uv run twine check dist/*
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Publish to PyPI
+        if: github.event_name == 'release'
+        run: uv publish
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch'
+        run: uv publish --publish-url https://test.pypi.org/legacy/

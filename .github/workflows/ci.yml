@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - run: uv sync --extra dev --locked
+      - run: uv run ruff check .
+      - run: uv run mypy src/pretense
+      - run: uv run pytest --cov=pretense
+      - run: uv run torchrun --standalone --nproc-per-node=2 tests/distributed/cocondenser_smoke.py
+      - run: uv build --no-sources
+      - run: uv run twine check dist/*
+      - run: uv run --refresh --with dist/*.whl --no-project python -c "import pretense"

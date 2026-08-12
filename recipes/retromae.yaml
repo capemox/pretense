@@ -1,0 +1,18 @@
+model:
+  model_name_or_path: google-bert/bert-base-uncased
+method:
+  name: retromae
+  encoder_mlm_probability: 0.30
+  decoder_mlm_probability: 0.50
+data:
+  dataset_name: wikimedia/wikipedia
+  dataset_config_name: 20231101.en
+  split: train
+  text_column: text
+  max_seq_length: 512
+training:
+  output_dir: outputs/retromae
+  per_device_train_batch_size: 16
+  learning_rate: 5.0e-5
+  num_train_epochs: 1
+  bf16: true

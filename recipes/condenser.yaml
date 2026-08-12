@@ -1,0 +1,15 @@
+model:
+  model_name_or_path: FacebookAI/roberta-base
+method:
+  name: condenser
+  head_layers: 2
+  late_mlm: true
+data:
+  dataset_name: wikimedia/wikipedia
+  dataset_config_name: 20231101.en
+  split: train
+  text_column: text
+training:
+  output_dir: outputs/condenser
+  per_device_train_batch_size: 16
+  bf16: true
