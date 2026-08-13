@@ -1,6 +1,10 @@
 cff-version: 1.2.0
-title: Pretense
-message: Please cite Pretense and the paper for the pretraining method you use.
+message: "Please cite Pretense and the paper for the pretraining method you use."
+title: "Pretense"
 type: software
-version: 0.1.0.dev0
+authors:
+  - family-names: "Krithiwas"
+    given-names: "Gautham"
+repository-code: "https://github.com/capemox/pretense"
+version: "0.1.0.dev0"
 license: Apache-2.0
