@@ -36,6 +36,10 @@ config = PretenseConfig.from_yaml("recipes/retromae.yaml")
 trainer = train(config)
 ```
 
+For a complete Python workflow—from programmatic RetroMAE pretraining and stored checkpoints to
+reloading and fine-tuning the exported encoder with Sentence Transformers—see the
+[programmatic examples](examples/README.md).
+
 In-memory Hugging Face datasets, tokenizers, and Pretense models can be supplied directly for
 notebooks, tests, and custom data pipelines:
 

@@ -17,6 +17,14 @@ def test_minimum_config_uses_documented_defaults() -> None:
     assert config.method.decoder_mlm_probability == 0.50
     assert config.model.model_kwargs == {}
     assert config.training.gradient_accumulation_steps == 1
+    assert config.training.save_total_limit is None
+
+
+def test_training_checkpoint_limit_round_trip() -> None:
+    value = minimum_config()
+    value["training"] = {"save_total_limit": 2}
+    config = PretenseConfig.from_dict(value)
+    assert config.training.save_total_limit == 2
 
 
 def test_model_kwargs_round_trip() -> None:

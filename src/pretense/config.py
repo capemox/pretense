@@ -91,6 +91,7 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
     logging_steps: int = 10
     save_steps: int = 500
+    save_total_limit: int | None = None
     eval_strategy: str = "no"
     save_strategy: str = "steps"
     seed: int = 42
