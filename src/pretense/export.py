@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
-from sentence_transformers.sentence_transformer.modules import Pooling, Transformer
+from sentence_transformers.sentence_transformer.modules import Normalize, Pooling, Transformer
 from transformers import AutoTokenizer
 
 from .modeling import PretensePretrainingModel
@@ -24,7 +24,12 @@ def export_transformers(
         tokenizer.save_pretrained(output)
     metadata = {
         "pretraining_method": model.method_config.name,
-        "pooling": "cls",
+        "pooling": "mean" if model.method_config.name == "contriever" else "cls",
+        "normalize_embeddings": (
+            model.method_config.normalize_embeddings
+            if model.method_config.name == "contriever"
+            else False
+        ),
         "pretense_format": 1,
     }
     (output / "pretense_export.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
@@ -40,19 +45,30 @@ def export_sentence_transformer(
 ) -> Path:
     source = Path(transformers_dir)
     output = Path(output_dir)
+    metadata_path = source / "pretense_export.json"
+    metadata = (
+        json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata_path.exists()
+        else {}
+    )
     transformer = Transformer(str(source))
-    pooling = Pooling(transformer.get_embedding_dimension(), pooling_mode="cls")
-    sentence_model = SentenceTransformer(modules=[transformer, pooling])
+    pooling_mode = metadata.get("pooling", "cls")
+    pooling = Pooling(transformer.get_embedding_dimension(), pooling_mode=pooling_mode)
+    modules = [transformer, pooling]
+    if metadata.get("normalize_embeddings", False):
+        modules.append(Normalize())
+    sentence_model = SentenceTransformer(modules=modules)
     sentence_model.save_pretrained(str(output), safe_serialization=True)
-    metadata = source / "pretense_export.json"
-    if metadata.exists():
-        shutil.copy2(metadata, output / metadata.name)
+    if metadata_path.exists():
+        shutil.copy2(metadata_path, output / metadata_path.name)
     readme = output / "README.md"
     with readme.open("a", encoding="utf-8") as handle:
         handle.write(
             "\n## Pretraining\n\n"
             "This encoder was pretrained with Pretense. See `pretense_export.json` for the method "
-            "and export metadata. Sentence embeddings use CLS pooling without normalization.\n"
+            f"and export metadata. Sentence embeddings use {pooling_mode} pooling"
+            f"{' with' if metadata.get('normalize_embeddings', False) else ' without'} "
+            "normalization.\n"
         )
     return output
 
@@ -68,6 +84,11 @@ def export_checkpoint(checkpoint: str | Path, output_dir: str | Path) -> tuple[P
 
 
 def _model_card(method: str, *, library_name: str) -> str:
+    representation = (
+        "Use attention-mask-aware mean pooling as the learned sentence representation."
+        if method == "contriever"
+        else "Use the first token hidden state as the learned sentence representation."
+    )
     return f"""---
 library_name: {library_name}
 tags:
@@ -80,6 +101,5 @@ tags:
 # Pretense {method} encoder
 
 This encoder was pretrained with Pretense using the **{method}** objective. It exports the clean
-Hugging Face backbone; pretraining-only auxiliary heads are intentionally omitted. Use the first
-token hidden state as the learned sentence representation.
+Hugging Face backbone; pretraining-only auxiliary heads are intentionally omitted. {representation}
 """

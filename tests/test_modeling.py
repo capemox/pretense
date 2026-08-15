@@ -85,6 +85,39 @@ def test_cocondenser_rejects_unpaired_batch() -> None:
         model(**mlm_batch(batch_size=3))
 
 
+def test_contriever_updates_momentum_encoder_and_queue() -> None:
+    config = MethodConfig(
+        name="contriever",
+        queue_size=8,
+        momentum=0.5,
+        contrastive_temperature=0.05,
+        normalize_embeddings=True,
+    )
+    model = MODEL_CLASSES["contriever"](tiny_encoder(), config)
+    before = next(model.momentum_encoder.parameters()).detach().clone()
+    with torch.no_grad():
+        next(model.encoder.parameters()).add_(1)
+    ids = torch.randint(5, 30, (2, 6))
+    mask = torch.ones_like(ids)
+    output = model(
+        query_input_ids=ids,
+        query_attention_mask=mask,
+        key_input_ids=ids.flip(1),
+        key_attention_mask=mask,
+    )
+    assert torch.isfinite(output.loss)
+    assert output.contrastive_loss is not None
+    assert output.sentence_embedding is not None
+    assert torch.allclose(output.sentence_embedding.norm(dim=-1), torch.ones(2), atol=1e-5)
+    assert model.queue_ptr.item() == 2
+    assert not torch.equal(before, next(model.momentum_encoder.parameters()))
+    output.loss.backward()
+    assert any(parameter.grad is not None for parameter in model.encoder.parameters())
+    assert model.encoder.cls.predictions.transform.dense.weight.requires_grad is False
+    assert model.encoder.cls.predictions.transform.dense.weight.grad is None
+    assert all(parameter.grad is None for parameter in model.momentum_encoder.parameters())
+
+
 @pytest.mark.parametrize(
     "encoder",
     [

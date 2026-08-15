@@ -114,3 +114,34 @@ def test_unpublished_custom_model_can_train_with_direct_adapter(tmp_path, tokeni
         model=model,
     )
     assert trainer.state.global_step == 1
+
+
+def test_unpublished_custom_model_can_train_with_contriever(tmp_path, tokenizer) -> None:
+    config = PretenseConfig.from_dict(
+        {
+            "model": {},
+            "method": {
+                "name": "contriever",
+                "queue_size": 8,
+                "contrastive_temperature": 0.05,
+            },
+            "data": {"max_seq_length": 16},
+            "training": {
+                "output_dir": str(tmp_path),
+                "per_device_train_batch_size": 2,
+                "max_steps": 1,
+                "save_strategy": "no",
+                "report_to": "none",
+            },
+            "export": {"transformers": False, "sentence_transformers": False},
+        }
+    )
+    raw_model = ToyForMaskedLM(ToyConfig(vocab_size=len(tokenizer)))
+    model = create_pretraining_model(config.method, raw_model, adapter=ToyAdapter())
+    trainer = train(
+        config,
+        train_dataset=Dataset.from_dict({"text": ["the quick fox", "the lazy dog"]}),
+        tokenizer=tokenizer,
+        model=model,
+    )
+    assert trainer.state.global_step == 1

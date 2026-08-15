@@ -6,7 +6,8 @@ from typing import Any, Literal
 
 import yaml
 
-MethodName = Literal["retromae", "dupmae", "condenser", "cocondenser"]
+MethodName = Literal["retromae", "dupmae", "condenser", "cocondenser", "contriever"]
+ContrieverAugmentation = Literal["none", "delete", "mask", "replace", "shuffle"]
 
 
 @dataclass
@@ -22,9 +23,16 @@ class MethodConfig:
     bow_loss_weight: float = 0.10
     contrastive_weight: float = 1.0
     contrastive_temperature: float = 1.0
+    momentum: float = 0.999
+    queue_size: int = 65_536
+    augmentation: ContrieverAugmentation = "delete"
+    augmentation_probability: float = 0.10
+    crop_ratio_min: float = 0.10
+    crop_ratio_max: float = 0.50
+    normalize_embeddings: bool = False
 
     def __post_init__(self) -> None:
-        supported = {"retromae", "dupmae", "condenser", "cocondenser"}
+        supported = {"retromae", "dupmae", "condenser", "cocondenser", "contriever"}
         if self.name not in supported:
             raise ValueError(
                 f"Unknown pretraining method {self.name!r}; choose from {sorted(supported)}."
@@ -42,6 +50,16 @@ class MethodConfig:
             raise ValueError("Loss weights cannot be negative.")
         if self.contrastive_temperature <= 0:
             raise ValueError("contrastive_temperature must be positive.")
+        if not 0 <= self.momentum < 1:
+            raise ValueError("momentum must be at least 0 and less than 1.")
+        if self.queue_size < 1:
+            raise ValueError("queue_size must be positive.")
+        if self.augmentation not in {"none", "delete", "mask", "replace", "shuffle"}:
+            raise ValueError(f"Unknown Contriever augmentation: {self.augmentation!r}.")
+        if not 0 <= self.augmentation_probability < 1:
+            raise ValueError("augmentation_probability must be at least 0 and less than 1.")
+        if not 0 < self.crop_ratio_min <= self.crop_ratio_max <= 1:
+            raise ValueError("Crop ratios must satisfy 0 < crop_ratio_min <= crop_ratio_max <= 1.")
 
 
 @dataclass

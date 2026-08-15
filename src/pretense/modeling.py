@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -339,11 +340,131 @@ class CoCondenserForPretraining(CondenserForPretraining):
         )
 
 
+@torch.no_grad()
+def _gather_without_grad(value: Tensor) -> Tensor:
+    if not dist.is_available() or not dist.is_initialized():
+        return value
+    gathered = [torch.empty_like(value) for _ in range(dist.get_world_size())]
+    dist.all_gather(gathered, value.contiguous())
+    return torch.cat(gathered, dim=0)
+
+
+class ContrieverForPretraining(PretensePretrainingModel):
+    """MoCo-style unsupervised dense-retrieval pretraining."""
+
+    method_name = "contriever"
+    momentum_encoder: PreTrainedModel
+    queue: Tensor
+    queue_ptr: Tensor
+
+    def __init__(
+        self,
+        encoder: PreTrainedModel,
+        method_config: MethodConfig,
+        adapter: BackboneAdapter | None = None,
+    ) -> None:
+        super().__init__(encoder, method_config, adapter)
+        self.encoder.requires_grad_(False)
+        self.adapter.backbone(self.encoder).requires_grad_(True)
+        self.momentum_encoder = deepcopy(encoder)
+        self.momentum_encoder.requires_grad_(False)
+        hidden_size = int(encoder.config.hidden_size)
+        reference = next(encoder.parameters())
+        queue = F.normalize(
+            torch.randn(
+                hidden_size,
+                method_config.queue_size,
+                device=reference.device,
+                dtype=reference.dtype,
+            ),
+            dim=0,
+        )
+        self.register_buffer("queue", queue)
+        self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
+    def _mean_encode(
+        self,
+        encoder: PreTrainedModel,
+        input_ids: Tensor,
+        attention_mask: Tensor,
+    ) -> Tensor:
+        output = self.adapter.backbone(encoder)(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+        if isinstance(output, Tensor):
+            hidden = output
+        elif hasattr(output, "last_hidden_state"):
+            hidden = output.last_hidden_state
+        else:
+            hidden = output[0]
+        mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
+        embeddings = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
+        if self.method_config.normalize_embeddings:
+            embeddings = F.normalize(embeddings, dim=-1)
+        return embeddings
+
+    @torch.no_grad()
+    def _update_momentum_encoder(self) -> None:
+        momentum = self.method_config.momentum
+        for online, target in zip(
+            self.encoder.parameters(), self.momentum_encoder.parameters(), strict=True
+        ):
+            target.mul_(momentum).add_(online, alpha=1 - momentum)
+
+    @torch.no_grad()
+    def _enqueue(self, keys: Tensor) -> None:
+        keys = _gather_without_grad(keys)
+        queue_size = self.queue.shape[1]
+        if keys.shape[0] >= queue_size:
+            self.queue.copy_(keys[-queue_size:].T)
+            self.queue_ptr.zero_()
+            return
+        pointer = int(self.queue_ptr.item())
+        first = min(queue_size - pointer, keys.shape[0])
+        self.queue[:, pointer : pointer + first] = keys[:first].T
+        remaining = keys.shape[0] - first
+        if remaining:
+            self.queue[:, :remaining] = keys[first:].T
+        self.queue_ptr[0] = (pointer + keys.shape[0]) % queue_size
+
+    def forward(
+        self,
+        query_input_ids: Tensor,
+        query_attention_mask: Tensor,
+        key_input_ids: Tensor,
+        key_attention_mask: Tensor,
+        **kwargs: Tensor,
+    ) -> PretensePretrainingOutput:
+        del kwargs
+        query = self._mean_encode(self.encoder, query_input_ids, query_attention_mask)
+        with torch.no_grad():
+            if self.training:
+                self._update_momentum_encoder()
+            key = self._mean_encode(
+                self.momentum_encoder, key_input_ids, key_attention_mask
+            )
+        positive = (query * key).sum(dim=-1, keepdim=True)
+        negative = query @ self.queue.clone().detach()
+        logits = torch.cat([positive, negative], dim=1)
+        logits /= self.method_config.contrastive_temperature
+        targets = torch.zeros(query.shape[0], dtype=torch.long, device=query.device)
+        contrastive_loss = F.cross_entropy(logits, targets)
+        if self.training:
+            self._enqueue(key)
+        return PretensePretrainingOutput(
+            loss=contrastive_loss,
+            sentence_embedding=query,
+            contrastive_loss=contrastive_loss,
+        )
+
+
 MODEL_CLASSES: dict[str, type[PretensePretrainingModel]] = {
     "retromae": RetroMAEForPretraining,
     "dupmae": DupMAEForPretraining,
     "condenser": CondenserForPretraining,
     "cocondenser": CoCondenserForPretraining,
+    "contriever": ContrieverForPretraining,
 }
 
 

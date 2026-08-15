@@ -37,7 +37,8 @@ def train(
         tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_name, trust_remote_code=config.model.trust_remote_code
         )
-    if tokenizer.mask_token_id is None:
+    needs_mask_token = config.method.name != "contriever" or config.method.augmentation == "mask"
+    if needs_mask_token and tokenizer.mask_token_id is None:
         raise ValueError("Pretense requires a tokenizer with a mask token.")
     if model is None:
         if config.model.model_name_or_path is None:
@@ -61,6 +62,11 @@ def train(
             raise ValueError(
                 f"The supplied model uses {model.method_config.name!r}, but the run is configured "
                 f"for {config.method.name!r}."
+            )
+        if model.method_config != config.method:
+            raise ValueError(
+                "The supplied model's MethodConfig does not match config.method. Construct the "
+                "model with create_pretraining_model(config.method, ...)."
             )
     dataset = (
         train_dataset

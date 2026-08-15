@@ -101,4 +101,5 @@ fallbacks.
 FlashAttention accelerates the Hugging Face encoder. RetroMAE and DupMAE's auxiliary reconstruction
 decoder and Condenser and coCondenser's auxiliary head remain standard PyTorch modules. Unlike the
 Sentence Transformers inference path, Pretense does not flatten or unpad collator batches; the
-selected Transformers backend receives the normal padded attention mask during MLM training.
+selected Transformers backend receives the normal padded attention mask during training.
+Contriever applies the selected backend to both its online encoder and the copied momentum encoder.

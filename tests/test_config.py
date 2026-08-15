@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from pretense import PretenseConfig
@@ -63,3 +65,46 @@ def test_unknown_method_is_rejected() -> None:
     value["method"]["name"] = "almost-retromae"
     with pytest.raises(ValueError, match="Unknown pretraining method"):
         PretenseConfig.from_dict(value)
+
+
+def test_contriever_config_round_trip() -> None:
+    value = minimum_config()
+    value["method"] = {
+        "name": "contriever",
+        "momentum": 0.9995,
+        "queue_size": 131_072,
+        "contrastive_temperature": 0.05,
+        "augmentation": "delete",
+        "augmentation_probability": 0.1,
+        "crop_ratio_min": 0.1,
+        "crop_ratio_max": 0.5,
+    }
+    config = PretenseConfig.from_dict(value)
+    assert config.method.name == "contriever"
+    assert config.method.queue_size == 131_072
+    assert config.to_dict()["method"]["momentum"] == 0.9995
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("momentum", 1.0),
+        ("queue_size", 0),
+        ("augmentation_probability", 1.0),
+        ("crop_ratio_min", 0.0),
+        ("crop_ratio_max", 1.1),
+    ],
+)
+def test_invalid_contriever_config_is_rejected(field: str, invalid: object) -> None:
+    value = minimum_config()
+    value["method"] = {"name": "contriever", field: invalid}
+    with pytest.raises(ValueError):
+        PretenseConfig.from_dict(value)
+
+
+def test_contriever_recipe_parses() -> None:
+    recipe = Path(__file__).parents[1] / "recipes" / "contriever.yaml"
+    config = PretenseConfig.from_yaml(recipe)
+    assert config.method.name == "contriever"
+    assert config.method.queue_size == 131_072
+    assert config.data.text_column == "text"

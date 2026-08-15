@@ -2,8 +2,8 @@
 
 Pretraining sentence transformers with retrieval-oriented objectives.
 
-Pretense provides modern Hugging Face implementations of RetroMAE, DupMAE, Condenser, and
-coCondenser. It trains through `transformers.Trainer`, reads `datasets` sources, supports
+Pretense provides modern Hugging Face implementations of RetroMAE, DupMAE, Condenser, coCondenser,
+and Contriever. It trains through `transformers.Trainer`, reads `datasets` sources, supports
 distributed training through Accelerate, and exports models that load directly in both
 Transformers and Sentence Transformers.
 
@@ -58,8 +58,9 @@ encoder = AutoModel.from_pretrained("outputs/retromae/exports/transformers")
 sentence_model = SentenceTransformer("outputs/retromae/exports/sentence-transformers")
 ```
 
-Both exports use the first token (CLS-equivalent) as the learned sentence representation. Pretense
-does not add normalization automatically.
+RetroMAE, DupMAE, Condenser, and coCondenser exports use the first token (CLS-equivalent) as the
+learned sentence representation. Contriever exports use attention-mask-aware mean pooling and can
+optionally include normalization when it was enabled during pretraining.
 
 ## Supported methods
 
@@ -69,6 +70,7 @@ does not add normalization automatically.
 | DupMAE | RetroMAE + ordinary-token bag-of-words prediction | `text` |
 | Condenser | skip-connected head MLM + late MLM | `text` |
 | coCondenser | Condenser + paired-span, cross-device contrastive loss | documents or paired spans |
+| Contriever | augmented-view MoCo contrastive learning | `text` |
 
 BERT, RoBERTa, ModernBERT, and DeBERTa-v3 (the Transformers `deberta-v2` model type) are certified.
 Other masked language models can be added through `BackboneAdapter` and
@@ -90,6 +92,11 @@ spans are required. Gradient accumulation must be one because it cannot reproduc
 negatives.
 Pretense therefore enables `dataloader_drop_last` automatically for coCondenser.
 
+Contriever creates two cropped and augmented views from each document. Its momentum encoder and
+negative queue are stored in training checkpoints, while clean exports contain only the online
+encoder and the correct mean-pooling configuration. See `recipes/contriever.yaml` for the reference
+settings.
+
 ## Development
 
 ```bash
@@ -106,5 +113,7 @@ scores. See [method notes](docs/methods.md) and [release documentation](docs/rel
 
 The implementation is informed by the papers and Apache-2.0 reference code for
 [RetroMAE/DupMAE](https://github.com/staoxiao/RetroMAE) and
-[Condenser/coCondenser](https://github.com/luyug/Condenser). Cite the corresponding paper when
-publishing results. Pretense itself is licensed under Apache-2.0.
+[Condenser/coCondenser](https://github.com/luyug/Condenser), and the archived reference code for
+[Contriever](https://github.com/facebookresearch/contriever), introduced in
+[Unsupervised Dense Information Retrieval with Contrastive Learning](https://arxiv.org/abs/2112.09118).
+Cite the corresponding paper when publishing results. Pretense itself is licensed under Apache-2.0.

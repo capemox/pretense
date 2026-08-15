@@ -1,6 +1,7 @@
 from pretense.modeling import (
     CoCondenserForPretraining,
     CondenserForPretraining,
+    ContrieverForPretraining,
     DupMAEForPretraining,
     RetroMAEForPretraining,
 )
@@ -8,6 +9,7 @@ from pretense.modeling import (
 __all__ = [
     "CoCondenserForPretraining",
     "CondenserForPretraining",
+    "ContrieverForPretraining",
     "DupMAEForPretraining",
     "RetroMAEForPretraining",
 ]

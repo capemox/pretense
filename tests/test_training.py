@@ -94,6 +94,18 @@ def test_programmatic_model_rejects_loader_kwargs(tmp_path: Path, tokenizer) -> 
         )
 
 
+def test_programmatic_model_must_match_method_settings(tmp_path: Path, tokenizer) -> None:
+    config = training_config(tmp_path, 1)
+    config.method.decoder_layers = 2
+    with pytest.raises(ValueError, match="MethodConfig does not match"):
+        train(
+            config,
+            train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
+            tokenizer=tokenizer,
+            model=tiny_model(len(tokenizer)),
+        )
+
+
 def test_training_forwards_model_kwargs_to_transformers(
     monkeypatch, tmp_path: Path, tokenizer
 ) -> None:

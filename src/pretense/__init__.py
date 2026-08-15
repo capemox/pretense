@@ -13,6 +13,7 @@ from .export import export_checkpoint, export_sentence_transformer, export_trans
 from .modeling import (
     CoCondenserForPretraining,
     CondenserForPretraining,
+    ContrieverForPretraining,
     DupMAEForPretraining,
     PretensePretrainingModel,
     RetroMAEForPretraining,
@@ -32,6 +33,7 @@ __all__ = [
     "BackboneAdapter",
     "CoCondenserForPretraining",
     "CondenserForPretraining",
+    "ContrieverForPretraining",
     "DataConfig",
     "DupMAEForPretraining",
     "ExportConfig",

@@ -241,6 +241,88 @@ class MLMCollator(BaseCollator):
         return {"input_ids": masked, "attention_mask": attention_mask, "labels": labels}
 
 
+@dataclass
+class ContrieverCollator(BaseCollator):
+    augmentation: str = "delete"
+    augmentation_probability: float = 0.10
+    crop_ratio_min: float = 0.10
+    crop_ratio_max: float = 0.50
+
+    def _augment(self, tokens: list[int]) -> list[int]:
+        probability = self.augmentation_probability
+        if self.augmentation == "delete":
+            augmented = [token for token in tokens if random.random() >= probability]
+            return augmented or [random.choice(tokens)]
+        if self.augmentation == "mask":
+            if self.tokenizer.mask_token_id is None:
+                raise ValueError("Contriever mask augmentation requires a tokenizer mask token.")
+            return [
+                self.tokenizer.mask_token_id if random.random() < probability else token
+                for token in tokens
+            ]
+        if self.augmentation == "replace":
+            return [
+                random.randrange(len(self.tokenizer)) if random.random() < probability else token
+                for token in tokens
+            ]
+        if self.augmentation == "shuffle":
+            indices = [index for index in range(len(tokens)) if random.random() < probability]
+            values = [tokens[index] for index in indices]
+            random.shuffle(values)
+            augmented = list(tokens)
+            for index, value in zip(indices, values, strict=True):
+                augmented[index] = value
+            return augmented
+        return tokens
+
+    def _view(self, tokens: list[int]) -> list[int]:
+        ratio = random.uniform(self.crop_ratio_min, self.crop_ratio_max)
+        length = max(1, int(len(tokens) * ratio))
+        start = random.randint(0, len(tokens) - length)
+        return self._augment(tokens[start : start + length])
+
+    def _pad_views(self, views: list[list[int]]) -> tuple[Tensor, Tensor]:
+        prefix = self.tokenizer.bos_token_id
+        if prefix is None:
+            prefix = self.tokenizer.cls_token_id
+        suffix = self.tokenizer.eos_token_id
+        if suffix is None:
+            suffix = self.tokenizer.sep_token_id
+        prepared = []
+        for view in views:
+            input_ids = ([prefix] if prefix is not None else []) + view
+            if suffix is not None:
+                input_ids.append(suffix)
+            input_ids = input_ids[: self.max_seq_length]
+            prepared.append({"input_ids": input_ids, "attention_mask": [1] * len(input_ids)})
+        batch = self.tokenizer.pad(prepared, padding=True, return_tensors="pt")
+        return batch["input_ids"], batch["attention_mask"]
+
+    def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        payload = self.max_seq_length - self.tokenizer.num_special_tokens_to_add(pair=False)
+        query_views: list[list[int]] = []
+        key_views: list[list[int]] = []
+        for example in examples:
+            tokens = self.tokenizer(
+                str(example[self.text_column]),
+                add_special_tokens=False,
+                max_length=payload,
+                truncation=True,
+            )["input_ids"]
+            if not tokens:
+                raise ValueError("Contriever cannot create views from an empty document.")
+            query_views.append(self._view(tokens))
+            key_views.append(self._view(tokens))
+        query_ids, query_mask = self._pad_views(query_views)
+        key_ids, key_mask = self._pad_views(key_views)
+        return {
+            "query_input_ids": query_ids,
+            "query_attention_mask": query_mask,
+            "key_input_ids": key_ids,
+            "key_attention_mask": key_mask,
+        }
+
+
 def build_collator(
     tokenizer: PreTrainedTokenizerBase,
     method: MethodConfig,
@@ -254,6 +336,16 @@ def build_collator(
             encoder_mlm_probability=method.encoder_mlm_probability,
             decoder_mlm_probability=method.decoder_mlm_probability,
             include_bow=method.name == "dupmae",
+        )
+    if method.name == "contriever":
+        return ContrieverCollator(
+            tokenizer=tokenizer,
+            max_seq_length=data.max_seq_length,
+            text_column=data.text_column,
+            augmentation=method.augmentation,
+            augmentation_probability=method.augmentation_probability,
+            crop_ratio_min=method.crop_ratio_min,
+            crop_ratio_max=method.crop_ratio_max,
         )
     return MLMCollator(
         tokenizer=tokenizer,
