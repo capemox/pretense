@@ -80,3 +80,47 @@ def test_programmatic_model_must_match_config(tmp_path: Path, tokenizer) -> None
             tokenizer=tokenizer,
             model=tiny_model(len(tokenizer)),
         )
+
+
+def test_programmatic_model_rejects_loader_kwargs(tmp_path: Path, tokenizer) -> None:
+    config = training_config(tmp_path, 1)
+    config.model.model_kwargs = {"attn_implementation": "flash_attention_2"}
+    with pytest.raises(ValueError, match="only apply when Pretense loads"):
+        train(
+            config,
+            train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
+            tokenizer=tokenizer,
+            model=tiny_model(len(tokenizer)),
+        )
+
+
+def test_training_forwards_model_kwargs_to_transformers(
+    monkeypatch, tmp_path: Path, tokenizer
+) -> None:
+    config = training_config(tmp_path, 1)
+    config.model.model_kwargs = {
+        "attn_implementation": "flash_attention_2",
+        "dtype": "bfloat16",
+    }
+    captured = {}
+
+    def fake_load(method, model_name_or_path, **kwargs):
+        captured["method"] = method
+        captured["model_name_or_path"] = model_name_or_path
+        captured.update(kwargs)
+        return tiny_model(len(tokenizer))
+
+    monkeypatch.setattr("pretense.training.load_pretraining_model", fake_load)
+    trainer = train(
+        config,
+        train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
+        tokenizer=tokenizer,
+    )
+    assert trainer.state.global_step == 1
+    assert captured == {
+        "method": config.method,
+        "model_name_or_path": "provided-programmatically",
+        "trust_remote_code": False,
+        "attn_implementation": "flash_attention_2",
+        "dtype": "bfloat16",
+    }

@@ -15,7 +15,25 @@ def test_minimum_config_uses_documented_defaults() -> None:
     config = PretenseConfig.from_dict(minimum_config())
     assert config.method.encoder_mlm_probability == 0.30
     assert config.method.decoder_mlm_probability == 0.50
+    assert config.model.model_kwargs == {}
     assert config.training.gradient_accumulation_steps == 1
+
+
+def test_model_kwargs_round_trip() -> None:
+    value = minimum_config()
+    value["model"]["model_kwargs"] = {
+        "attn_implementation": "flash_attention_2",
+        "dtype": "bfloat16",
+    }
+    config = PretenseConfig.from_dict(value)
+    assert config.to_dict()["model"]["model_kwargs"] == value["model"]["model_kwargs"]
+
+
+def test_model_kwargs_rejects_duplicate_trust_remote_code() -> None:
+    value = minimum_config()
+    value["model"]["model_kwargs"] = {"trust_remote_code": True}
+    with pytest.raises(ValueError, match="Set model.trust_remote_code directly"):
+        PretenseConfig.from_dict(value)
 
 
 def test_unknown_keys_fail_early() -> None:

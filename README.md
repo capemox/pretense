@@ -74,6 +74,10 @@ Unpublished or experimental models can be passed directly with `create_pretraini
 not need to be saved first, registered with `AutoModel`, or uploaded to the Hub. See
 [custom models](docs/custom-models.md).
 
+FlashAttention and other Transformers attention backends can be selected through
+`model.model_kwargs`. See [FlashAttention](docs/flash-attention.md) for YAML and Python examples,
+installation options, and limitations.
+
 Pretense supports Sentence Transformers 5.x and 6.x model layouts.
 
 For coCondenser, provide a `spans` list, span rows plus a document-ID column, or documents in the

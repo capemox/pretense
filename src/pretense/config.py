@@ -49,6 +49,15 @@ class ModelConfig:
     model_name_or_path: str | None = None
     tokenizer_name_or_path: str | None = None
     trust_remote_code: bool = False
+    model_kwargs: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model_kwargs, dict):
+            raise ValueError("model.model_kwargs must be a mapping.")
+        if "trust_remote_code" in self.model_kwargs:
+            raise ValueError(
+                "Set model.trust_remote_code directly instead of putting it in model.model_kwargs."
+            )
 
 
 @dataclass

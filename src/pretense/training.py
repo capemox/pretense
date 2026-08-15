@@ -48,12 +48,20 @@ def train(
             config.method,
             config.model.model_name_or_path,
             trust_remote_code=config.model.trust_remote_code,
+            **config.model.model_kwargs,
         )
-    elif model.method_config.name != config.method.name:
-        raise ValueError(
-            f"The supplied model uses {model.method_config.name!r}, but the run is configured "
-            f"for {config.method.name!r}."
-        )
+    else:
+        if config.model.model_kwargs:
+            raise ValueError(
+                "model.model_kwargs only apply when Pretense loads model_name_or_path. "
+                "When supplying model=..., configure its attention backend and dtype while "
+                "constructing the underlying masked-language model."
+            )
+        if model.method_config.name != config.method.name:
+            raise ValueError(
+                f"The supplied model uses {model.method_config.name!r}, but the run is configured "
+                f"for {config.method.name!r}."
+            )
     dataset = (
         train_dataset
         if train_dataset is not None

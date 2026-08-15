@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import torch
 from transformers import (
@@ -11,7 +13,7 @@ from transformers import (
 
 from pretense.backbones import get_backbone_adapter
 from pretense.config import MethodConfig
-from pretense.modeling import MODEL_CLASSES
+from pretense.modeling import MODEL_CLASSES, load_pretraining_model
 
 
 def tiny_encoder() -> BertForMaskedLM:
@@ -126,3 +128,35 @@ def test_modernbert_adapter_is_registered() -> None:
 
     adapter = get_backbone_adapter(Model())  # type: ignore[arg-type]
     assert "modernbert" in adapter.model_types
+
+
+def test_loader_forwards_transformers_attention_kwargs(monkeypatch) -> None:
+    captured = {}
+
+    def fake_from_pretrained(model_name_or_path: str, **kwargs):
+        captured["model_name_or_path"] = model_name_or_path
+        captured.update(kwargs)
+        return tiny_encoder()
+
+    monkeypatch.setattr(
+        "pretense.modeling.AutoModelForMaskedLM.from_pretrained", fake_from_pretrained
+    )
+    model = load_pretraining_model(
+        "retromae",
+        "example/model",
+        attn_implementation="flash_attention_2",
+        dtype="bfloat16",
+    )
+    assert isinstance(model, MODEL_CLASSES["retromae"])
+    assert captured == {
+        "model_name_or_path": "example/model",
+        "attn_implementation": "flash_attention_2",
+        "dtype": "bfloat16",
+    }
+
+
+def test_loader_selects_real_transformers_attention_backend(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "model"
+    tiny_encoder().save_pretrained(checkpoint)
+    model = load_pretraining_model("retromae", str(checkpoint), attn_implementation="sdpa")
+    assert model.encoder.config._attn_implementation == "sdpa"
