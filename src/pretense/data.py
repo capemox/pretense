@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def load_pretraining_dataset(config: DataConfig, method: str) -> Dataset | IterableDataset:
     if config.dataset_name is None and config.data_files is None:
         raise ValueError(
-            "Set data.dataset_name or data.data_files, or pass train_dataset to pretense.train()."
+            "Set data.dataset_name or data.data_files in the recipe configuration."
         )
     if config.dataset_name is not None:
         dataset = load_dataset(

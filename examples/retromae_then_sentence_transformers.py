@@ -17,6 +17,7 @@ from sentence_transformers import (
     SentenceTransformerTrainer,
     SentenceTransformerTrainingArguments,
 )
+from transformers import AutoTokenizer
 
 try:
     from sentence_transformers.sentence_transformer.losses import MultipleNegativesRankingLoss
@@ -25,7 +26,15 @@ except ImportError:  # Sentence Transformers 5.2-5.6
     from sentence_transformers.losses import MultipleNegativesRankingLoss
     from sentence_transformers.training_args import BatchSamplers
 
-from pretense import PretenseConfig, train
+from pretense import (
+    MAECollator,
+    MethodConfig,
+    PretenseTrainer,
+    PretenseTrainingArguments,
+    export_sentence_transformer,
+    export_transformers,
+    load_pretraining_model,
+)
 
 BASE_MODEL = "google-bert/bert-base-uncased"
 OUTPUT_ROOT = Path("outputs/programmatic-retromae")
@@ -57,39 +66,53 @@ def pretrain_retromae(pretraining_corpus: Dataset) -> Path:
     """Pretrain RetroMAE and return the clean Sentence Transformers export path."""
     use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     use_fp16 = torch.cuda.is_available() and not use_bf16
-    config = PretenseConfig.from_dict(
-        {
-            "model": {"model_name_or_path": BASE_MODEL},
-            "method": {
-                "name": "retromae",
-                "encoder_mlm_probability": 0.30,
-                "decoder_mlm_probability": 0.50,
-            },
-            "data": {"text_column": "text", "max_seq_length": 128},
-            "training": {
-                "output_dir": str(PRETRAINING_OUTPUT),
-                "per_device_train_batch_size": 16,
-                "learning_rate": 5e-5,
-                "num_train_epochs": 1,
-                "warmup_ratio": 0.1,
-                "logging_steps": 100,
-                "save_strategy": "steps",
-                "save_steps": 1_000,
-                "bf16": use_bf16,
-                "fp16": use_fp16,
-                "report_to": "none",
-            },
-            "export": {"transformers": True, "sentence_transformers": True},
-        }
+    method = MethodConfig(
+        name="retromae",
+        encoder_mlm_probability=0.30,
+        decoder_mlm_probability=0.50,
     )
-
-    trainer = train(config, train_dataset=pretraining_corpus)
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    model = load_pretraining_model(method, BASE_MODEL)
+    trainer = PretenseTrainer(
+        model=model,
+        args=PretenseTrainingArguments(
+            output_dir=str(PRETRAINING_OUTPUT),
+            per_device_train_batch_size=16,
+            learning_rate=5e-5,
+            num_train_epochs=1,
+            warmup_steps=0.1,
+            logging_steps=100,
+            save_strategy="steps",
+            save_steps=1_000,
+            bf16=use_bf16,
+            fp16=use_fp16,
+            report_to="none",
+        ),
+        train_dataset=pretraining_corpus,
+        data_collator=MAECollator(
+            tokenizer=tokenizer,
+            text_column="text",
+            max_seq_length=128,
+            encoder_mlm_probability=method.encoder_mlm_probability,
+            decoder_mlm_probability=method.decoder_mlm_probability,
+        ),
+        processing_class=tokenizer,
+    )
+    trainer.train()
+    full_checkpoint = PRETRAINING_OUTPUT / "final-checkpoint"
+    trainer.save_model(str(full_checkpoint))
     print(f"RetroMAE finished at step {trainer.state.global_step}.")
-    print(f"Full Pretense weights: {PRETRAINING_OUTPUT / 'final-checkpoint'}")
+    print(f"Full Pretense weights: {full_checkpoint}")
 
     # This export contains only the pretrained encoder plus CLS pooling. Auxiliary RetroMAE
     # decoder weights stay in final-checkpoint because downstream ST training does not need them.
+    transformers_export = export_transformers(
+        trainer.model,
+        tokenizer,
+        PRETRAINING_OUTPUT / "exports" / "transformers",
+    )
     sentence_transformers_export = PRETRAINING_OUTPUT / "exports" / "sentence-transformers"
+    export_sentence_transformer(transformers_export, sentence_transformers_export)
     print(f"Sentence Transformers export: {sentence_transformers_export}")
     return sentence_transformers_export
 

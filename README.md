@@ -27,33 +27,57 @@ uv/PyTorch index for the target system.
 
 For development from a source checkout, use `uv sync --extra dev` instead.
 
-## Train
+## Train with the Python SDK
 
-Start with one of the files under `recipes/`:
+`PretenseTrainer` follows the Hugging Face Trainer interface:
+
+```python
+from transformers import AutoTokenizer
+
+from pretense import (
+    MAECollator,
+    MethodConfig,
+    PretenseTrainer,
+    PretenseTrainingArguments,
+    load_pretraining_model,
+)
+
+model_name = "google-bert/bert-base-uncased"
+method = MethodConfig(name="retromae")
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = load_pretraining_model(method, model_name)
+
+trainer = PretenseTrainer(
+    model=model,
+    args=PretenseTrainingArguments(
+        output_dir="outputs/retromae",
+        per_device_train_batch_size=16,
+        learning_rate=5e-5,
+        num_train_epochs=1,
+    ),
+    train_dataset=dataset,
+    data_collator=MAECollator(tokenizer=tokenizer, text_column="text"),
+    processing_class=tokenizer,
+)
+trainer.train()
+trainer.save_model("outputs/retromae/final")
+```
+
+The trainer accepts the same callbacks, optimizers, schedulers, evaluation datasets, and metrics as
+`transformers.Trainer`. Ordinary `transformers.TrainingArguments` are also supported. When the
+dataset uses the standard columns shown below, the trainer can select the collator automatically;
+pass a collator explicitly for custom column names or explicit MNRL negatives.
+
+For complete Python workflows, including programmatic models and Sentence Transformers
+fine-tuning, see the [examples](https://github.com/capemox/pretense/tree/main/examples).
+
+## Train from a recipe
+
+YAML recipes provide a command-line shortcut for standard runs:
 
 ```bash
 uv run pretense train recipes/retromae.yaml
 torchrun --nproc-per-node 4 --module pretense.cli train recipes/cocondenser.yaml
-```
-
-The Python API exposes the same components:
-
-```python
-from pretense import PretenseConfig, train
-
-config = PretenseConfig.from_yaml("recipes/retromae.yaml")
-trainer = train(config)
-```
-
-For a complete Python workflow—from programmatic RetroMAE pretraining and stored checkpoints to
-reloading and fine-tuning the exported encoder with Sentence Transformers—see the
-[programmatic examples](https://github.com/capemox/pretense/tree/main/examples).
-
-In-memory Hugging Face datasets, tokenizers, and Pretense models can be supplied directly for
-notebooks, tests, and custom data pipelines:
-
-```python
-trainer = train(config, train_dataset=dataset, tokenizer=tokenizer, model=model)
 ```
 
 Training produces regular console and `training_log.jsonl` metrics, resumable `checkpoint-*`

@@ -2,12 +2,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 from .backbones import BackboneAdapter, register_backbone_adapter
 from .config import (
-    DataConfig,
-    ExportConfig,
     MethodConfig,
-    ModelConfig,
-    PretenseConfig,
-    TrainingConfig,
+)
+from .data import (
+    ContrastiveCollator,
+    ContrieverCollator,
+    MAECollator,
+    MLMCollator,
+    MNRLCollator,
 )
 from .export import export_checkpoint, export_sentence_transformer, export_transformers
 from .modeling import (
@@ -30,7 +32,7 @@ from .objectives import (
 )
 from .outputs import PretensePretrainingOutput
 from .trainer import PretenseTrainer
-from .training import train
+from .training_args import PretenseTrainingArguments
 
 try:
     __version__ = version("pretense")
@@ -45,25 +47,25 @@ __all__ = [
     "CondenserForPretraining",
     "ContrastiveForPretraining",
     "ContrastiveLoss",
+    "ContrastiveCollator",
+    "ContrieverCollator",
     "ContrieverForPretraining",
-    "DataConfig",
     "DupMAEForPretraining",
-    "ExportConfig",
+    "MAECollator",
+    "MLMCollator",
+    "MNRLCollator",
     "MethodConfig",
     "MNRLForPretraining",
-    "ModelConfig",
     "MultipleNegativesRankingLoss",
-    "PretenseConfig",
     "PretensePretrainingModel",
     "PretensePretrainingOutput",
     "PretenseTrainer",
+    "PretenseTrainingArguments",
     "RetroMAEForPretraining",
-    "TrainingConfig",
     "create_pretraining_model",
     "export_checkpoint",
     "export_sentence_transformer",
     "export_transformers",
     "load_pretraining_model",
     "register_backbone_adapter",
-    "train",
 ]

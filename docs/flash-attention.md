@@ -1,7 +1,8 @@
 # FlashAttention
 
-Pretense forwards `model.model_kwargs` to Transformers' `AutoModelForMaskedLM.from_pretrained`.
-Select FlashAttention-2 and a supported half-precision dtype in a recipe:
+In recipes, Pretense forwards `model.model_kwargs` to Transformers'
+`AutoModelForMaskedLM.from_pretrained`. Select FlashAttention-2 and a supported half-precision
+dtype like this:
 
 ```yaml
 model:
@@ -13,26 +14,27 @@ training:
   bf16: true
 ```
 
-The equivalent Python SDK configuration is:
+With the Python SDK, pass the attention backend while loading the model and use normal trainer
+arguments for mixed precision:
 
 ```python
-from pretense import PretenseConfig, train
+from pretense import MethodConfig, PretenseTrainer, PretenseTrainingArguments
+from pretense import load_pretraining_model
 
-config = PretenseConfig.from_dict(
-    {
-        "model": {
-            "model_name_or_path": "google-bert/bert-base-uncased",
-            "model_kwargs": {
-                "attn_implementation": "flash_attention_2",
-                "dtype": "bfloat16",
-            },
-        },
-        "method": {"name": "retromae"},
-        "data": {"dataset_name": "wikimedia/wikipedia"},
-        "training": {"bf16": True},
-    }
+model = load_pretraining_model(
+    MethodConfig(name="retromae"),
+    "google-bert/bert-base-uncased",
+    attn_implementation="flash_attention_2",
+    dtype="bfloat16",
 )
-trainer = train(config)
+trainer = PretenseTrainer(
+    model=model,
+    args=PretenseTrainingArguments(output_dir="outputs/retromae", bf16=True),
+    train_dataset=dataset,
+    data_collator=collator,
+    processing_class=tokenizer,
+)
+trainer.train()
 ```
 
 Install a FlashAttention implementation supported by Transformers. As in Sentence Transformers,

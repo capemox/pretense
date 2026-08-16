@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from pretense import PretenseConfig
+from pretense.config import PretenseConfig
 
 
 def minimum_config() -> dict:

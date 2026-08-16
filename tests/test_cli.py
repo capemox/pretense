@@ -27,7 +27,7 @@ data:
         encoding="utf-8",
     )
     captured = []
-    monkeypatch.setattr("pretense.cli.run_training", captured.append)
+    monkeypatch.setattr("pretense.cli._run_recipe", captured.append)
     result = runner.invoke(
         app,
         [

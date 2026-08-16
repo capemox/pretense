@@ -30,8 +30,8 @@ jobs:
       - name: Smoke-test the installed wheel API
         run: >-
           uv run --refresh --with dist/*.whl --no-project python -c
-          "from pretense import ContrastiveLoss, MultipleNegativesRankingLoss,
-          CachedMultipleNegativesRankingLoss"
+          "from pretense import PretenseTrainer, PretenseTrainingArguments, MNRLCollator,
+          ContrastiveLoss, MultipleNegativesRankingLoss, CachedMultipleNegativesRankingLoss"
 
   dependency-floor:
     runs-on: ubuntu-latest

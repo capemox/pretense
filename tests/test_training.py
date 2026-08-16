@@ -8,11 +8,11 @@ from transformers.trainer import TRAINING_ARGS_NAME
 
 from pretense import (
     MethodConfig,
-    PretenseConfig,
     RetroMAEForPretraining,
     create_pretraining_model,
-    train,
 )
+from pretense.config import PretenseConfig
+from pretense.training import _run_recipe
 
 
 def tiny_model(vocab_size: int) -> RetroMAEForPretraining:
@@ -63,7 +63,7 @@ def test_programmatic_dataset_checkpoint_and_resume(tmp_path: Path, tokenizer) -
     )
     first_output = tmp_path / "first"
     callback = LogCounter()
-    trainer = train(
+    trainer = _run_recipe(
         training_config(first_output, 1),
         train_dataset=dataset,
         tokenizer=tokenizer,
@@ -86,7 +86,7 @@ def test_programmatic_dataset_checkpoint_and_resume(tmp_path: Path, tokenizer) -
 
     resumed_config = training_config(tmp_path / "resumed", 2)
     resumed_config.training.resume_from_checkpoint = str(checkpoint)
-    resumed = train(
+    resumed = _run_recipe(
         resumed_config,
         train_dataset=dataset,
         tokenizer=tokenizer,
@@ -103,7 +103,7 @@ def test_evaluation_and_checkpoint_retention(tmp_path: Path, tokenizer) -> None:
     config.training.eval_strategy = "steps"
     config.training.eval_steps = 1
     config.training.save_total_limit = 1
-    trainer = train(
+    trainer = _run_recipe(
         config,
         train_dataset=dataset,
         eval_dataset=dataset,
@@ -118,7 +118,7 @@ def test_evaluation_requires_dataset(tmp_path: Path, tokenizer) -> None:
     config = training_config(tmp_path, 1)
     config.training.eval_strategy = "steps"
     with pytest.raises(ValueError, match="Pass eval_dataset"):
-        train(
+        _run_recipe(
             config,
             train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
             tokenizer=tokenizer,
@@ -128,7 +128,7 @@ def test_evaluation_requires_dataset(tmp_path: Path, tokenizer) -> None:
 
 def test_programmatic_dataset_columns_are_validated(tmp_path: Path, tokenizer) -> None:
     with pytest.raises(ValueError, match="missing required columns.*text"):
-        train(
+        _run_recipe(
             training_config(tmp_path, 1),
             train_dataset=Dataset.from_dict({"body": ["the fox", "the dog"]}),
             tokenizer=tokenizer,
@@ -141,7 +141,7 @@ def test_mutated_weights_only_config_cannot_resume(tmp_path: Path, tokenizer) ->
     config.training.save_only_model = True
     config.training.resume_from_checkpoint = True
     with pytest.raises(ValueError, match="cannot be resumed"):
-        train(
+        _run_recipe(
             config,
             train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
             tokenizer=tokenizer,
@@ -152,7 +152,7 @@ def test_mutated_weights_only_config_cannot_resume(tmp_path: Path, tokenizer) ->
 def test_gradient_checkpointing_is_enabled_on_encoder(tmp_path: Path, tokenizer) -> None:
     config = training_config(tmp_path, 1)
     config.training.gradient_checkpointing = True
-    trainer = train(
+    trainer = _run_recipe(
         config,
         train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
         tokenizer=tokenizer,
@@ -193,7 +193,7 @@ def test_pairwise_contrastive_training(tmp_path: Path, tokenizer) -> None:
             max_position_embeddings=32,
         )
     )
-    trainer = train(
+    trainer = _run_recipe(
         config,
         train_dataset=Dataset.from_dict(
             {
@@ -245,7 +245,7 @@ def test_mnrl_training(method: str, tmp_path: Path, tokenizer) -> None:
             max_position_embeddings=32,
         )
     )
-    trainer = train(
+    trainer = _run_recipe(
         config,
         train_dataset=Dataset.from_dict(
             {
@@ -273,7 +273,7 @@ def test_programmatic_model_must_match_config(tmp_path: Path, tokenizer) -> None
     config = training_config(tmp_path, 1)
     config.method.name = "dupmae"
     with pytest.raises(ValueError, match="supplied model uses 'retromae'"):
-        train(
+        _run_recipe(
             config,
             train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
             tokenizer=tokenizer,
@@ -285,7 +285,7 @@ def test_programmatic_model_rejects_loader_kwargs(tmp_path: Path, tokenizer) -> 
     config = training_config(tmp_path, 1)
     config.model.model_kwargs = {"attn_implementation": "flash_attention_2"}
     with pytest.raises(ValueError, match="only apply when Pretense loads"):
-        train(
+        _run_recipe(
             config,
             train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
             tokenizer=tokenizer,
@@ -297,7 +297,7 @@ def test_programmatic_model_must_match_method_settings(tmp_path: Path, tokenizer
     config = training_config(tmp_path, 1)
     config.method.decoder_layers = 2
     with pytest.raises(ValueError, match="MethodConfig does not match"):
-        train(
+        _run_recipe(
             config,
             train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
             tokenizer=tokenizer,
@@ -322,7 +322,7 @@ def test_training_forwards_model_kwargs_to_transformers(
         return tiny_model(len(tokenizer))
 
     monkeypatch.setattr("pretense.training.load_pretraining_model", fake_load)
-    trainer = train(
+    trainer = _run_recipe(
         config,
         train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
         tokenizer=tokenizer,

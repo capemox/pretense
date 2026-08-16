@@ -6,7 +6,9 @@ from torch import Tensor, nn
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.modeling_outputs import MaskedLMOutput
 
-from pretense import BackboneAdapter, PretenseConfig, create_pretraining_model, train
+from pretense import BackboneAdapter, create_pretraining_model
+from pretense.config import PretenseConfig
+from pretense.training import _run_recipe
 
 
 class ToyConfig(PretrainedConfig):
@@ -107,7 +109,7 @@ def test_unpublished_custom_model_can_train_with_direct_adapter(tmp_path, tokeni
             "export": {"transformers": False, "sentence_transformers": False},
         }
     )
-    trainer = train(
+    trainer = _run_recipe(
         config,
         train_dataset=Dataset.from_dict({"text": ["the quick fox", "the lazy dog"]}),
         tokenizer=tokenizer,
@@ -138,7 +140,7 @@ def test_unpublished_custom_model_can_train_with_contriever(tmp_path, tokenizer)
     )
     raw_model = ToyForMaskedLM(ToyConfig(vocab_size=len(tokenizer)))
     model = create_pretraining_model(config.method, raw_model, adapter=ToyAdapter())
-    trainer = train(
+    trainer = _run_recipe(
         config,
         train_dataset=Dataset.from_dict({"text": ["the quick fox", "the lazy dog"]}),
         tokenizer=tokenizer,

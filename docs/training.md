@@ -1,26 +1,43 @@
 # Training, logging, and checkpoints
 
-`pretense.train()` uses the Hugging Face `Trainer` loop. The familiar training controls are fields
-of `TrainingConfig`, whether the configuration is created in Python or read from a recipe.
+`PretenseTrainer` subclasses Hugging Face `Trainer`. Use `PretenseTrainingArguments`, which extends
+`transformers.TrainingArguments` with defaults suitable for Pretense's text collators.
 
-```yaml
-training:
-  output_dir: outputs/retromae
-  per_device_train_batch_size: 16
-  gradient_accumulation_steps: 2
-  learning_rate: 5.0e-5
-  max_steps: 10000
-  warmup_ratio: 0.1
-  logging_strategy: steps
-  logging_steps: 50
-  logging_first_step: true
-  save_strategy: steps
-  save_steps: 500
-  save_total_limit: 2
-  eval_strategy: steps
-  eval_steps: 500
-  report_to: none
+```python
+from pretense import PretenseTrainer, PretenseTrainingArguments
+
+args = PretenseTrainingArguments(
+    output_dir="outputs/retromae",
+    per_device_train_batch_size=16,
+    gradient_accumulation_steps=2,
+    learning_rate=5e-5,
+    max_steps=10_000,
+    warmup_steps=0.1,
+    logging_strategy="steps",
+    logging_steps=50,
+    logging_first_step=True,
+    save_strategy="steps",
+    save_steps=500,
+    save_total_limit=2,
+    eval_strategy="steps",
+    eval_steps=500,
+    report_to="none",
+)
+
+trainer = PretenseTrainer(
+    model=model,
+    args=args,
+    train_dataset=train_dataset,
+    eval_dataset=validation_dataset,
+    data_collator=collator,
+    processing_class=tokenizer,
+)
+trainer.train()
 ```
+
+If `processing_class` is a tokenizer and `data_collator` is omitted, the trainer selects the
+method's collator using standard column names (`text`, `text_pair`, and `label`). Pass an explicit
+collator when using custom names, coCondenser span fields, or MNRL explicit-negative columns.
 
 `logging_steps`, `save_steps`, and `eval_steps` accept either an integer number of update steps or a
 ratio below one. Normal Trainer logs go to the console and `trainer.state.log_history`. Pretense
@@ -32,31 +49,33 @@ Set `report_to` to an installed Trainer integration such as `tensorboard` or `wa
 
 ## Evaluation
 
-Enable evaluation and pass a validation dataset through the Python API:
+Pass a validation dataset to the trainer and select an evaluation strategy in the training
+arguments:
 
 ```python
-trainer = train(
-    config,
+trainer = PretenseTrainer(
+    model=model,
+    args=args,
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
-    tokenizer=tokenizer,
-    model=model,
+    data_collator=collator,
+    processing_class=tokenizer,
 )
+trainer.train()
 ```
 
-Pretense validates and prepares both datasets the same way. An evaluation strategy without an
-evaluation dataset fails early. `load_best_model_at_end`, `metric_for_best_model`, and
-`greater_is_better` are forwarded to Trainer. As in Trainer, the save and evaluation strategies
-and their step cadence must agree when loading the best model at the end.
+`load_best_model_at_end`, `metric_for_best_model`, and `greater_is_better` behave as they do in
+Transformers. The save and evaluation strategies and their step cadence must agree when loading the
+best model at the end.
 
 ## Checkpointing and recovery
 
 Each `checkpoint-N/` stores the complete Pretense model, tokenizer, optimizer, scheduler, random
-state, and Trainer state. Limit disk use with `save_total_limit`. Resume either in Python:
+state, and Trainer state. Limit disk use with `save_total_limit`. Resume with the standard Trainer
+API:
 
 ```python
-config.training.resume_from_checkpoint = "outputs/retromae/checkpoint-500"
-trainer = train(config)
+trainer.train(resume_from_checkpoint="outputs/retromae/checkpoint-500")
 ```
 
 or on the command line:
@@ -65,12 +84,13 @@ or on the command line:
 pretense train recipes/retromae.yaml --resume-from-checkpoint outputs/retromae/checkpoint-500
 ```
 
-Passing `True` as `resume_from_checkpoint` asks Trainer to find the latest checkpoint in the output
-directory. `save_only_model: true` saves space but intentionally omits the state needed to resume;
-Pretense rejects that combination up front.
+Passing `True` asks Trainer to find the latest checkpoint in the output directory. Setting
+`save_only_model=True` saves space but intentionally omits the optimizer and scheduler state needed
+to resume.
 
-After training, `final-checkpoint/` is a portable, weights-only Pretense checkpoint. The clean
-downstream models are under `exports/transformers/` and `exports/sentence-transformers/`.
+Call `trainer.save_model("path")` for a portable, weights-only Pretense checkpoint. Use
+`export_transformers()` or `export_sentence_transformer()` when you need a clean downstream
+encoder without the pretraining objective's auxiliary modules.
 
 ## Programmatic control
 
@@ -79,12 +99,13 @@ Callbacks use the standard Transformers interface:
 ```python
 from transformers import EarlyStoppingCallback
 
-trainer = train(
-    config,
+trainer = PretenseTrainer(
+    model=model,
+    args=args,
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
-    tokenizer=tokenizer,
-    model=model,
+    data_collator=collator,
+    processing_class=tokenizer,
     callbacks=[EarlyStoppingCallback(early_stopping_patience=3)],
 )
 ```
@@ -97,3 +118,15 @@ known. Caller-supplied datasets must contain the columns required by the selecte
   `negative_columns` adds an optional explicit-negative column.
 - coCondenser accepts the same `spans_column` and `document_id_column` formats for programmatic and
   recipe-loaded datasets.
+
+## Recipes and the CLI
+
+YAML recipes remain available for standard command-line runs:
+
+```bash
+pretense train recipes/retromae.yaml
+```
+
+The CLI converts the recipe into the same model, collator, training arguments, and
+`PretenseTrainer` objects shown above. Its recipe-configuration objects are internal to the
+command-line path and are not requirements of the Python SDK.

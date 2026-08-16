@@ -14,6 +14,8 @@ All notable changes follow Keep a Changelog and Semantic Versioning.
 - Add regular component-loss logging, JSONL metrics, evaluation datasets, callbacks, checkpoint
   retention, best-model controls, and explicit resume validation.
 - Report evaluation loss for label-free objectives such as Contriever, MNRL, and CMNRL.
+- Make `PretenseTrainer` and `PretenseTrainingArguments` the primary Python SDK, expose data
+  collators publicly, and retain `PretenseConfig` only for YAML recipe execution through the CLI.
 - Support Sentence Transformers 5.2 through 6.x layouts and Transformers 5.x training arguments.
 - Validate and prepare caller-supplied datasets consistently with recipe-loaded datasets.
 - Add supervised pairwise contrastive training compatible with Sentence Transformers'

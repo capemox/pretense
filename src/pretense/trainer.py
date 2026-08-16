@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import torch
-from transformers import Trainer
+from transformers import PreTrainedTokenizerBase, Trainer, TrainerCallback, TrainingArguments
 from transformers.trainer import TRAINING_ARGS_NAME
+from transformers.trainer_utils import EvalPrediction
 
+from .config import DataConfig
+from .data import build_collator
 from .modeling import PretensePretrainingModel
 
 
@@ -27,10 +31,73 @@ class PretenseTrainer(Trainer):
         "mnrl_loss",
     )
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        model: PretensePretrainingModel | None = None,
+        args: TrainingArguments | None = None,
+        data_collator: Callable[[list[Any]], dict[str, Any]] | None = None,
+        train_dataset: Any | None = None,
+        eval_dataset: Any | dict[str, Any] | None = None,
+        processing_class: Any | None = None,
+        model_init: Callable[..., PretensePretrainingModel] | None = None,
+        compute_loss_func: Callable[..., Any] | None = None,
+        compute_metrics: Callable[[EvalPrediction], dict[str, Any]] | None = None,
+        callbacks: list[TrainerCallback] | None = None,
+        optimizers: tuple[Any | None, Any | None] = (None, None),
+        optimizer_cls_and_kwargs: tuple[type[torch.optim.Optimizer], dict[str, Any]] | None = None,
+        preprocess_logits_for_metrics: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
+        | None = None,
+    ) -> None:
         self._component_loss_totals = {}
         self._component_loss_batches = 0
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            model=model,
+            args=args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=processing_class,
+            model_init=model_init,
+            compute_loss_func=compute_loss_func,
+            compute_metrics=compute_metrics,
+            callbacks=callbacks,
+            optimizers=optimizers,
+            optimizer_cls_and_kwargs=optimizer_cls_and_kwargs,
+            preprocess_logits_for_metrics=preprocess_logits_for_metrics,
+        )
+        if not isinstance(self.model, PretensePretrainingModel):
+            raise TypeError("PretenseTrainer requires a PretensePretrainingModel.")
+        if isinstance(self.processing_class, PreTrainedTokenizerBase):
+            tokenizer = self.processing_class
+            if data_collator is None:
+                self.data_collator = build_collator(
+                    tokenizer,
+                    self.model.method_config,
+                    DataConfig(),
+                )
+            needs_mask_token = self.model.method_config.name in {
+                "retromae",
+                "dupmae",
+                "condenser",
+                "cocondenser",
+            } or (
+                self.model.method_config.name == "contriever"
+                and self.model.method_config.augmentation == "mask"
+            )
+            if needs_mask_token and tokenizer.mask_token_id is None:
+                raise ValueError("This Pretense method requires a tokenizer with a mask token.")
+            if tokenizer.pad_token_id is None:
+                raise ValueError("Pretense requires a tokenizer with a padding token.")
+        # Pretense collators consume the original text columns. Transformers otherwise removes
+        # them before collation based on the model forward signature.
+        self.args.remove_unused_columns = False
+        if self.model.method_config.name == "cocondenser":
+            if self.args.gradient_accumulation_steps != 1:
+                raise ValueError(
+                    "coCondenser requires gradient_accumulation_steps=1 because accumulation "
+                    "does not reproduce global in-batch negatives."
+                )
+            self.args.dataloader_drop_last = True
         # MNRL, CMNRL, and Contriever compute a loss without a field named ``labels``. Generic
         # Trainer inference otherwise treats those batches as prediction-only and omits eval_loss.
         self.can_return_loss = True

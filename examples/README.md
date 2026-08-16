@@ -1,7 +1,7 @@
 # Programmatic examples
 
-Recipes under `recipes/` are intended for the `pretense train` command. The scripts here show the
-same workflows through the Python SDK.
+Recipes under `recipes/` are intended for the `pretense train` command. These scripts use the
+composable `PretenseTrainer` Python API instead.
 
 ## RetroMAE followed by Sentence Transformers fine-tuning
 
@@ -9,7 +9,7 @@ same workflows through the Python SDK.
 complete model lifecycle:
 
 1. Load positive NLI pairs and turn their sentences into an unlabeled RetroMAE corpus.
-2. Construct `PretenseConfig` directly in Python and run pretraining with `train()`.
+2. Construct the model, collator, training arguments, and `PretenseTrainer` directly in Python.
 3. Store resumable checkpoints, full RetroMAE weights, and clean Transformers exports.
 4. Reload the Sentence Transformers export with `SentenceTransformer`.
 5. Fine-tune it with `MultipleNegativesRankingLoss` and the no-duplicates batch sampler.

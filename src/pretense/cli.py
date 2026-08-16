@@ -6,7 +6,7 @@ import typer
 from . import __version__
 from .config import PretenseConfig
 from .export import export_checkpoint
-from .training import train as run_training
+from .training import _run_recipe
 
 app = typer.Typer(help="Pretrain sentence transformers with retrieval-oriented objectives.")
 
@@ -39,7 +39,7 @@ def train_command(
         config.training.output_dir = str(output_dir)
     if resume_from_checkpoint is not None:
         config.training.resume_from_checkpoint = resume_from_checkpoint
-    run_training(config)
+    _run_recipe(config)
 
 
 @app.command("export")

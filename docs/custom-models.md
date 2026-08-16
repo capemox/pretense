@@ -45,26 +45,23 @@ model = create_pretraining_model(
 )
 ```
 
-The model, tokenizer, and dataset can then be passed without any Hub identifiers:
+The model, tokenizer, and dataset can then be passed directly to the trainer:
 
 ```python
-from pretense import PretenseConfig, train
+from pretense import MAECollator, PretenseTrainer, PretenseTrainingArguments
 
-config = PretenseConfig.from_dict(
-    {
-        "model": {},
-        "method": {"name": "retromae"},
-        "data": {"text_column": "text", "max_seq_length": 128},
-        "training": {"output_dir": "outputs/custom-model"},
-    }
-)
-
-trainer = train(
-    config,
+trainer = PretenseTrainer(
     model=model,
-    tokenizer=my_tokenizer,
+    args=PretenseTrainingArguments(output_dir="outputs/custom-model"),
     train_dataset=my_dataset,
+    data_collator=MAECollator(
+        tokenizer=my_tokenizer,
+        text_column="text",
+        max_seq_length=128,
+    ),
+    processing_class=my_tokenizer,
 )
+trainer.train()
 ```
 
 The raw MLM should be a Transformers `PreTrainedModel` with a normal configuration and a forward
@@ -73,11 +70,14 @@ It must return a `MaskedLMOutput`-compatible object. It can be defined entirely 
 registration with `AutoModel`, saving it first, and uploading it are not required.
 
 Contriever, pairwise contrastive training, MNRL, and CMNRL use the same programmatic model path.
-Construct the model with the exact `config.method` instance so all objective settings are preserved
-in its resumable state:
+Keep the method configuration used to construct the model so its objective settings are preserved
+in checkpoints:
 
 ```python
-model = create_pretraining_model(config.method, raw_model, adapter=MyAdapter())
+from pretense import MethodConfig
+
+method = MethodConfig(name="mnrl", mnrl_scale=20.0)
+model = create_pretraining_model(method, raw_model, adapter=MyAdapter())
 ```
 
 Passing the adapter directly scopes it to that model. Use `register_backbone_adapter()` only when

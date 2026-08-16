@@ -1,14 +1,14 @@
 """Train a retrieval encoder with MNRL or memory-efficient cached MNRL."""
 
 from datasets import Dataset
+from transformers import AutoTokenizer
 
 from pretense import (
-    DataConfig,
     MethodConfig,
-    ModelConfig,
-    PretenseConfig,
-    TrainingConfig,
-    train,
+    MNRLCollator,
+    PretenseTrainer,
+    PretenseTrainingArguments,
+    load_pretraining_model,
 )
 
 # CMNRL uses the same objective and negative pool while encoding in smaller chunks.
@@ -39,30 +39,39 @@ def main() -> None:
         }
     )
     method_name = "cmnrl" if USE_CACHE else "mnrl"
-    config = PretenseConfig(
-        model=ModelConfig(model_name_or_path="google-bert/bert-base-uncased"),
-        method=MethodConfig(
-            name=method_name,
-            mnrl_scale=20.0,
-            mnrl_similarity="cosine",
-            cmnrl_mini_batch_size=2,
-        ),
-        data=DataConfig(
-            text_column="query",
-            text_pair_column="positive",
-            negative_columns=["hard_negative"],
-            max_seq_length=128,
-        ),
-        training=TrainingConfig(
-            output_dir=f"outputs/programmatic-{method_name}",
+    model_name = "google-bert/bert-base-uncased"
+    method = MethodConfig(
+        name=method_name,
+        mnrl_scale=20.0,
+        mnrl_similarity="cosine",
+        cmnrl_mini_batch_size=2,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = load_pretraining_model(method, model_name)
+    output_dir = f"outputs/programmatic-{method_name}"
+    trainer = PretenseTrainer(
+        model=model,
+        args=PretenseTrainingArguments(
+            output_dir=output_dir,
             per_device_train_batch_size=4,
             max_steps=100,
             logging_steps=10,
             save_steps=50,
             save_total_limit=2,
+            report_to="none",
         ),
+        train_dataset=retrieval_data,
+        data_collator=MNRLCollator(
+            tokenizer=tokenizer,
+            text_column="query",
+            text_pair_column="positive",
+            negative_columns=("hard_negative",),
+            max_seq_length=128,
+        ),
+        processing_class=tokenizer,
     )
-    train(config, train_dataset=retrieval_data)
+    trainer.train()
+    trainer.save_model(f"{output_dir}/final")
 
 
 if __name__ == "__main__":

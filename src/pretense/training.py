@@ -9,7 +9,6 @@ from transformers import (
     AutoTokenizer,
     PreTrainedTokenizerBase,
     TrainerCallback,
-    TrainingArguments,
     set_seed,
 )
 
@@ -18,9 +17,10 @@ from .data import build_collator, load_pretraining_dataset, prepare_pretraining_
 from .export import export_sentence_transformer, export_transformers
 from .modeling import PretensePretrainingModel, load_pretraining_model
 from .trainer import PretenseTrainer
+from .training_args import PretenseTrainingArguments
 
 
-def train(
+def _run_recipe(
     config: PretenseConfig,
     *,
     train_dataset: Dataset | IterableDataset | None = None,
@@ -30,11 +30,6 @@ def train(
     callbacks: list[TrainerCallback] | None = None,
 ) -> PretenseTrainer:
     config.validate()
-    if config.method.name == "cocondenser" and config.training.gradient_accumulation_steps != 1:
-        raise ValueError(
-            "coCondenser requires gradient_accumulation_steps=1 because accumulation does not "
-            "reproduce global in-batch negatives."
-        )
     set_seed(config.training.seed)
     tokenizer_name = config.model.tokenizer_name_or_path or config.model.model_name_or_path
     if tokenizer is None:
@@ -104,9 +99,7 @@ def train(
     # Transformers 5 expresses a ratio as a fractional warmup_steps value. Its short-lived
     # warmup_ratio alias was deprecated before being removed from later 5.x releases.
     training_values["warmup_steps"] = training_values.pop("warmup_ratio")
-    if config.method.name == "cocondenser":
-        training_values["dataloader_drop_last"] = True
-    arguments = TrainingArguments(
+    arguments = PretenseTrainingArguments(
         **training_values,
         remove_unused_columns=False,
     )
