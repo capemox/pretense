@@ -32,7 +32,6 @@ from pretense import (
     PretenseTrainer,
     PretenseTrainingArguments,
     export_sentence_transformer,
-    export_transformers,
     load_pretraining_model,
 )
 
@@ -106,13 +105,12 @@ def pretrain_retromae(pretraining_corpus: Dataset) -> Path:
 
     # This export contains only the pretrained encoder plus CLS pooling. Auxiliary RetroMAE
     # decoder weights stay in final-checkpoint because downstream ST training does not need them.
-    transformers_export = export_transformers(
+    sentence_transformers_export = PRETRAINING_OUTPUT / "exports" / "sentence-transformers"
+    export_sentence_transformer(
         trainer.model,
         tokenizer,
-        PRETRAINING_OUTPUT / "exports" / "transformers",
+        sentence_transformers_export,
     )
-    sentence_transformers_export = PRETRAINING_OUTPUT / "exports" / "sentence-transformers"
-    export_sentence_transformer(transformers_export, sentence_transformers_export)
     print(f"Sentence Transformers export: {sentence_transformers_export}")
     return sentence_transformers_export
 

@@ -80,8 +80,9 @@ uv run pretense train recipes/retromae.yaml
 torchrun --nproc-per-node 4 --module pretense.cli train recipes/cocondenser.yaml
 ```
 
-Training produces regular console and `training_log.jsonl` metrics, resumable `checkpoint-*`
-directories, a final weights-only `final-checkpoint/`, and two clean exports. See
+Recipe training produces regular console and `training_log.jsonl` metrics, resumable `checkpoint-*`
+directories, a final weights-only `final-checkpoint/`, and one clean Sentence Transformers export.
+See
 [training and checkpointing](https://github.com/capemox/pretense/blob/main/docs/training.md) for
 evaluation, retention, callbacks, experiment trackers, and recovery after interruption.
 
@@ -89,9 +90,15 @@ evaluation, retention, callbacks, experiment trackers, and recovery after interr
 from transformers import AutoModel
 from sentence_transformers import SentenceTransformer
 
-encoder = AutoModel.from_pretrained("outputs/retromae/exports/transformers")
 sentence_model = SentenceTransformer("outputs/retromae/exports/sentence-transformers")
+encoder = AutoModel.from_pretrained(
+    "outputs/retromae/exports/sentence-transformers/0_Transformer"
+)
 ```
+
+The Sentence Transformers directory is the canonical export. It includes the complete Hugging Face
+backbone under `0_Transformer/`, so separate copies of the model weights are unnecessary. For a Hub
+export, load that backbone with `AutoModel.from_pretrained(repo_id, subfolder="0_Transformer")`.
 
 ## Supported methods
 

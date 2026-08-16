@@ -14,7 +14,7 @@ from transformers import (
 
 from .config import PretenseConfig
 from .data import build_collator, load_pretraining_dataset, prepare_pretraining_dataset
-from .export import export_sentence_transformer, export_transformers
+from .export import export_sentence_transformer
 from .modeling import PretensePretrainingModel, load_pretraining_model
 from .trainer import PretenseTrainer
 from .training_args import PretenseTrainingArguments
@@ -119,35 +119,23 @@ def _run_recipe(
         json.dumps(config.to_dict(), indent=2), encoding="utf-8"
     )
     export_root = Path(config.training.output_dir) / "exports"
-    transformers_dir: Path | None = None
-    if config.export.transformers or config.export.sentence_transformers:
-        transformers_dir = export_transformers(model, tokenizer, export_root / "transformers")
-    if config.export.sentence_transformers:
-        assert transformers_dir is not None
-        export_sentence_transformer(transformers_dir, export_root / "sentence-transformers")
+    export_dir: Path | None = None
+    if config.export.enabled:
+        export_dir = export_sentence_transformer(
+            model,
+            tokenizer,
+            export_root / "sentence-transformers",
+        )
     if config.export.push_to_hub:
-        _push_exports(config, transformers_dir, export_root)
+        assert export_dir is not None
+        _push_export(config, export_dir)
     return trainer
 
 
-def _push_exports(config: PretenseConfig, transformers_dir: Path | None, export_root: Path) -> None:
+def _push_export(config: PretenseConfig, export_dir: Path) -> None:
     from huggingface_hub import HfApi
 
     api = HfApi()
-    if config.export.transformers_repo_id:
-        assert transformers_dir is not None
-        api.create_repo(config.export.transformers_repo_id, repo_type="model", exist_ok=True)
-        api.upload_folder(
-            repo_id=config.export.transformers_repo_id,
-            folder_path=transformers_dir,
-            repo_type="model",
-        )
-    if config.export.sentence_transformers_repo_id:
-        api.create_repo(
-            config.export.sentence_transformers_repo_id, repo_type="model", exist_ok=True
-        )
-        api.upload_folder(
-            repo_id=config.export.sentence_transformers_repo_id,
-            folder_path=export_root / "sentence-transformers",
-            repo_type="model",
-        )
+    assert config.export.repo_id is not None
+    api.create_repo(config.export.repo_id, repo_type="model", exist_ok=True)
+    api.upload_folder(repo_id=config.export.repo_id, folder_path=export_dir, repo_type="model")

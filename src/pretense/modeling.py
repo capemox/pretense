@@ -118,8 +118,7 @@ class PretensePretrainingModel(PreTrainedModel):
             return
         if push_to_hub:
             raise ValueError(
-                "Push a final Transformers or Sentence Transformers export, "
-                "not a training checkpoint."
+                "Push the final Sentence Transformers export, not a training checkpoint."
             )
         output = Path(save_directory)
         output.mkdir(parents=True, exist_ok=True)

@@ -36,14 +36,14 @@ def test_weights_only_checkpoint_cannot_be_resumed() -> None:
         PretenseConfig.from_dict(value)
 
 
-def test_hub_push_requires_a_matching_export() -> None:
+def test_hub_push_requires_an_enabled_export_and_repo_id() -> None:
     value = minimum_config()
-    value["export"] = {
-        "push_to_hub": True,
-        "transformers": False,
-        "transformers_repo_id": "owner/model",
-    }
-    with pytest.raises(ValueError, match="Enable the Transformers export"):
+    value["export"] = {"push_to_hub": True}
+    with pytest.raises(ValueError, match="export.repo_id"):
+        PretenseConfig.from_dict(value)
+
+    value["export"] = {"push_to_hub": True, "enabled": False, "repo_id": "owner/model"}
+    with pytest.raises(ValueError, match="Enable the model export"):
         PretenseConfig.from_dict(value)
 
 

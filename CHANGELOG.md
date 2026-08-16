@@ -16,6 +16,8 @@ All notable changes follow Keep a Changelog and Semantic Versioning.
 - Report evaluation loss for label-free objectives such as Contriever, MNRL, and CMNRL.
 - Make `PretenseTrainer` and `PretenseTrainingArguments` the primary Python SDK, expose data
   collators publicly, and retain `PretenseConfig` only for YAML recipe execution through the CLI.
+- Use one canonical Sentence Transformers export, with its Hugging Face backbone available under
+  `0_Transformer/`, instead of duplicating model weights across two export directories.
 - Support Sentence Transformers 5.2 through 6.x layouts and Transformers 5.x training arguments.
 - Validate and prepare caller-supplied datasets consistently with recipe-loaded datasets.
 - Add supervised pairwise contrastive training compatible with Sentence Transformers'

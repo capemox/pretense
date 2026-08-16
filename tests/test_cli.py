@@ -44,14 +44,15 @@ data:
     assert captured[0].training.resume_from_checkpoint == "checkpoint-10"
 
 
-def test_export_cli_reports_both_outputs(monkeypatch, tmp_path: Path) -> None:
+def test_export_cli_reports_single_export_and_nested_backbone(monkeypatch, tmp_path: Path) -> None:
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     monkeypatch.setattr(
         "pretense.cli.export_checkpoint",
-        lambda checkpoint, output: (Path(output) / "transformers", Path(output) / "sentence"),
+        lambda checkpoint, output: Path(output) / "sentence-transformers",
     )
     result = runner.invoke(app, ["export", str(checkpoint), "-o", str(tmp_path / "exports")])
     assert result.exit_code == 0
-    assert "Transformers export" in result.stdout
-    assert "Sentence Transformers export" in result.stdout
+    assert f"Model export: {tmp_path / 'exports' / 'sentence-transformers'}" in result.stdout
+    assert "Transformers backbone:" in result.stdout
+    assert "0_Transformer" in result.stdout

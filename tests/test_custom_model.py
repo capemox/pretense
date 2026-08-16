@@ -106,7 +106,7 @@ def test_unpublished_custom_model_can_train_with_direct_adapter(tmp_path, tokeni
                 "save_strategy": "no",
                 "report_to": "none",
             },
-            "export": {"transformers": False, "sentence_transformers": False},
+            "export": {"enabled": False},
         }
     )
     trainer = _run_recipe(
@@ -135,7 +135,7 @@ def test_unpublished_custom_model_can_train_with_contriever(tmp_path, tokenizer)
                 "save_strategy": "no",
                 "report_to": "none",
             },
-            "export": {"transformers": False, "sentence_transformers": False},
+            "export": {"enabled": False},
         }
     )
     raw_model = ToyForMaskedLM(ToyConfig(vocab_size=len(tokenizer)))

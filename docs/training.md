@@ -89,8 +89,32 @@ Passing `True` asks Trainer to find the latest checkpoint in the output director
 to resume.
 
 Call `trainer.save_model("path")` for a portable, weights-only Pretense checkpoint. Use
-`export_transformers()` or `export_sentence_transformer()` when you need a clean downstream
-encoder without the pretraining objective's auxiliary modules.
+`export_sentence_transformer(trainer.model, tokenizer, "path")` for the clean downstream export:
+
+```text
+sentence-transformers/
+├── modules.json
+├── 0_Transformer/       # complete Hugging Face model and tokenizer
+└── 1_Pooling/           # method-appropriate sentence pooling
+```
+
+Load the full sentence model from the export root:
+
+```python
+from sentence_transformers import SentenceTransformer
+
+sentence_model = SentenceTransformer("exports/sentence-transformers")
+```
+
+Load only its Transformer backbone from the nested module:
+
+```python
+from transformers import AutoModel
+
+encoder = AutoModel.from_pretrained("exports/sentence-transformers/0_Transformer")
+```
+
+For a model on the Hub, use `AutoModel.from_pretrained(repo_id, subfolder="0_Transformer")`.
 
 ## Programmatic control
 

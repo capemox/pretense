@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import shutil
+import tempfile
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
@@ -20,7 +21,7 @@ Pooling = _st_modules.Pooling
 Transformer = _st_modules.Transformer
 
 
-def export_transformers(
+def _export_transformers(
     model: PretensePretrainingModel,
     tokenizer: object,
     output_dir: str | Path,
@@ -53,30 +54,33 @@ def export_transformers(
 
 
 def export_sentence_transformer(
-    transformers_dir: str | Path,
+    model: PretensePretrainingModel,
+    tokenizer: object,
     output_dir: str | Path,
 ) -> Path:
-    source = Path(transformers_dir)
     output = Path(output_dir)
-    metadata_path = source / "pretense_export.json"
-    metadata = (
-        json.loads(metadata_path.read_text(encoding="utf-8"))
-        if metadata_path.exists()
-        else {}
-    )
-    transformer = Transformer(str(source))
-    pooling_mode = metadata.get("pooling", "cls")
-    if hasattr(transformer, "get_embedding_dimension"):
-        dimension = transformer.get_embedding_dimension()
-    else:  # Sentence Transformers 5.2
-        dimension = transformer.get_word_embedding_dimension()
-    pooling = Pooling(dimension, pooling_mode=pooling_mode)
-    modules = [transformer, pooling]
-    if metadata.get("normalize_embeddings", False):
-        modules.append(Normalize())
-    sentence_model = SentenceTransformer(modules=modules)
-    sentence_model.save_pretrained(str(output), safe_serialization=True)
-    if metadata_path.exists():
+    with tempfile.TemporaryDirectory(prefix="pretense-export-") as temporary:
+        source = _export_transformers(model, tokenizer, Path(temporary) / "transformer")
+        metadata_path = source / "pretense_export.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        transformer = Transformer(str(source))
+        # Sentence Transformers 6 saves the first input module in the model root by
+        # default, while 5.x uses ``0_Transformer``. Keep Pretense exports stable
+        # across both supported lines and make the raw Transformers model easy to
+        # address as a Hub subfolder.
+        if hasattr(transformer, "save_in_root"):
+            transformer.save_in_root = False
+        pooling_mode = metadata["pooling"]
+        if hasattr(transformer, "get_embedding_dimension"):
+            dimension = transformer.get_embedding_dimension()
+        else:  # Sentence Transformers 5.2
+            dimension = transformer.get_word_embedding_dimension()
+        pooling = Pooling(dimension, pooling_mode=pooling_mode)
+        modules = [transformer, pooling]
+        if metadata["normalize_embeddings"]:
+            modules.append(Normalize())
+        sentence_model = SentenceTransformer(modules=modules)
+        sentence_model.save_pretrained(str(output), safe_serialization=True)
         shutil.copy2(metadata_path, output / metadata_path.name)
     readme = output / "README.md"
     with readme.open("a", encoding="utf-8") as handle:
@@ -85,19 +89,19 @@ def export_sentence_transformer(
             "This encoder was pretrained with Pretense. See `pretense_export.json` for the method "
             f"and export metadata. Sentence embeddings use {pooling_mode} pooling"
             f"{' with' if metadata.get('normalize_embeddings', False) else ' without'} "
-            "normalization.\n"
+            "normalization. To load only the Hugging Face Transformer backbone, use the "
+            "`0_Transformer/` subdirectory (or the `subfolder=\"0_Transformer\"` argument on "
+            "the Hub).\n"
         )
     return output
 
 
-def export_checkpoint(checkpoint: str | Path, output_dir: str | Path) -> tuple[Path, Path]:
+def export_checkpoint(checkpoint: str | Path, output_dir: str | Path) -> Path:
     checkpoint_path = Path(checkpoint)
     model = PretensePretrainingModel.from_pretraining_checkpoint(checkpoint_path)
     tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
     root = Path(output_dir)
-    transformers_dir = export_transformers(model, tokenizer, root / "transformers")
-    sentence_dir = export_sentence_transformer(transformers_dir, root / "sentence-transformers")
-    return transformers_dir, sentence_dir
+    return export_sentence_transformer(model, tokenizer, root / "sentence-transformers")
 
 
 def _model_card(method: str, *, library_name: str) -> str:

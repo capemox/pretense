@@ -206,28 +206,15 @@ class TrainingConfig:
 
 @dataclass
 class ExportConfig:
-    transformers: bool = True
-    sentence_transformers: bool = True
+    enabled: bool = True
     push_to_hub: bool = False
-    transformers_repo_id: str | None = None
-    sentence_transformers_repo_id: str | None = None
+    repo_id: str | None = None
 
     def __post_init__(self) -> None:
-        if self.push_to_hub and not (
-            self.transformers_repo_id or self.sentence_transformers_repo_id
-        ):
-            raise ValueError("Set at least one export repository ID when push_to_hub is enabled.")
-        if self.push_to_hub and self.transformers_repo_id and not self.transformers:
-            raise ValueError("Enable the Transformers export before pushing transformers_repo_id.")
-        if (
-            self.push_to_hub
-            and self.sentence_transformers_repo_id
-            and not self.sentence_transformers
-        ):
-            raise ValueError(
-                "Enable the Sentence Transformers export before pushing "
-                "sentence_transformers_repo_id."
-            )
+        if self.push_to_hub and not self.repo_id:
+            raise ValueError("Set export.repo_id when push_to_hub is enabled.")
+        if self.push_to_hub and not self.enabled:
+            raise ValueError("Enable the model export before pushing it to the Hub.")
 
 
 @dataclass

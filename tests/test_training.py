@@ -44,7 +44,7 @@ def training_config(output_dir: Path, max_steps: int) -> PretenseConfig:
                 "logging_steps": 1,
                 "report_to": "none",
             },
-            "export": {"transformers": False, "sentence_transformers": False},
+            "export": {"enabled": False},
         }
     )
 
@@ -180,7 +180,7 @@ def test_pairwise_contrastive_training(tmp_path: Path, tokenizer) -> None:
                 "logging_steps": 1,
                 "report_to": "none",
             },
-            "export": {"transformers": False, "sentence_transformers": False},
+            "export": {"enabled": False},
         }
     )
     raw_model = BertForMaskedLM(
@@ -232,7 +232,7 @@ def test_mnrl_training(method: str, tmp_path: Path, tokenizer) -> None:
                 "gradient_checkpointing": method == "cmnrl",
                 "report_to": "none",
             },
-            "export": {"transformers": False, "sentence_transformers": False},
+            "export": {"enabled": False},
         }
     )
     raw_model = BertForMaskedLM(

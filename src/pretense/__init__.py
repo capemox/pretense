@@ -11,7 +11,7 @@ from .data import (
     MLMCollator,
     MNRLCollator,
 )
-from .export import export_checkpoint, export_sentence_transformer, export_transformers
+from .export import export_checkpoint, export_sentence_transformer
 from .modeling import (
     CachedMNRLForPretraining,
     CoCondenserForPretraining,
@@ -65,7 +65,6 @@ __all__ = [
     "create_pretraining_model",
     "export_checkpoint",
     "export_sentence_transformer",
-    "export_transformers",
     "load_pretraining_model",
     "register_backbone_adapter",
 ]

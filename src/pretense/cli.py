@@ -47,10 +47,10 @@ def export_command(
     checkpoint: Annotated[Path, typer.Argument(exists=True, file_okay=False, readable=True)],
     output_dir: Annotated[Path, typer.Option("--output-dir", "-o")] = Path("exports"),
 ) -> None:
-    """Create Transformers and Sentence Transformers exports from a checkpoint."""
-    transformers_dir, sentence_dir = export_checkpoint(checkpoint, output_dir)
-    typer.echo(f"Transformers export: {transformers_dir}")
-    typer.echo(f"Sentence Transformers export: {sentence_dir}")
+    """Create a Sentence Transformers export containing the Hugging Face backbone."""
+    export_dir = export_checkpoint(checkpoint, output_dir)
+    typer.echo(f"Model export: {export_dir}")
+    typer.echo(f"Transformers backbone: {export_dir / '0_Transformer'}")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ complete model lifecycle:
 
 1. Load positive NLI pairs and turn their sentences into an unlabeled RetroMAE corpus.
 2. Construct the model, collator, training arguments, and `PretenseTrainer` directly in Python.
-3. Store resumable checkpoints, full RetroMAE weights, and clean Transformers exports.
+3. Store resumable checkpoints, full RetroMAE weights, and one clean Sentence Transformers export.
 4. Reload the Sentence Transformers export with `SentenceTransformer`.
 5. Fine-tune it with `MultipleNegativesRankingLoss` and the no-duplicates batch sampler.
 6. Save and reload the final sentence-embedding model.
@@ -32,8 +32,8 @@ outputs/programmatic-retromae/
 │   ├── checkpoint-*/                 # resumable Trainer state
 │   ├── final-checkpoint/             # encoder plus RetroMAE auxiliary weights
 │   └── exports/
-│       ├── transformers/             # clean Hugging Face encoder
 │       └── sentence-transformers/    # clean encoder plus CLS pooling
+│           └── 0_Transformer/        # Hugging Face backbone
 └── sentence-transformers-finetuning/
     ├── checkpoints/                  # ST Trainer checkpoints
     └── final/                        # reloadable fine-tuned Sentence Transformer
