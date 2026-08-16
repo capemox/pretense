@@ -7,14 +7,17 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 from transformers import BertConfig, BertForMaskedLM
 
-from pretense import CoCondenserForPretraining, ContrieverForPretraining, MethodConfig
+from pretense import (
+    CachedMNRLForPretraining,
+    CoCondenserForPretraining,
+    ContrieverForPretraining,
+    MethodConfig,
+    MNRLForPretraining,
+)
 
 
-def main() -> None:
-    dist.init_process_group("gloo")
-    rank = int(os.environ["RANK"])
-    torch.manual_seed(13)
-    encoder = BertForMaskedLM(
+def tiny_encoder() -> BertForMaskedLM:
+    return BertForMaskedLM(
         BertConfig(
             vocab_size=32,
             hidden_size=16,
@@ -24,6 +27,13 @@ def main() -> None:
             max_position_embeddings=32,
         )
     )
+
+
+def main() -> None:
+    dist.init_process_group("gloo")
+    rank = int(os.environ["RANK"])
+    torch.manual_seed(13)
+    encoder = tiny_encoder()
     model = CoCondenserForPretraining(encoder, MethodConfig(name="cocondenser"))
     input_ids = torch.randint(5, 30, (2, 8))
     input_ids[:, 0] = 2
@@ -66,6 +76,32 @@ def main() -> None:
     dist.broadcast(rank_zero_queue, src=0)
     assert torch.equal(contriever.queue, rank_zero_queue)
     assert contriever.encoder.bert.embeddings.word_embeddings.weight.grad is not None
+
+    for model_class, method_name in (
+        (MNRLForPretraining, "mnrl"),
+        (CachedMNRLForPretraining, "cmnrl"),
+    ):
+        ranking_model = model_class(
+            tiny_encoder(),
+            MethodConfig(
+                name=method_name,
+                mnrl_gather_across_devices=True,
+                cmnrl_mini_batch_size=1,
+            ),
+        )
+        distributed_ranking = DistributedDataParallel(ranking_model)
+        anchor_ids = torch.randint(5, 30, (2, 8))
+        candidate_ids = torch.randint(5, 30, (2, 2, 8)) + rank % 2
+        ranking_output = distributed_ranking(
+            anchor_input_ids=anchor_ids,
+            anchor_attention_mask=torch.ones_like(anchor_ids),
+            candidate_input_ids=candidate_ids,
+            candidate_attention_mask=torch.ones_like(candidate_ids),
+        )
+        assert ranking_output.mnrl_loss is not None
+        assert torch.isfinite(ranking_output.mnrl_loss)
+        ranking_output.loss.backward()
+        assert ranking_model.encoder.bert.embeddings.word_embeddings.weight.grad is not None
     dist.barrier()
     dist.destroy_process_group()
 

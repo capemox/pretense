@@ -1,11 +1,14 @@
+import pytest
 import torch
 from datasets import Dataset
 
 from pretense.config import DataConfig, MethodConfig
 from pretense.data import (
+    ContrastiveCollator,
     ContrieverCollator,
     MAECollator,
     MLMCollator,
+    MNRLCollator,
     build_collator,
     prepare_pretraining_dataset,
 )
@@ -94,3 +97,60 @@ def test_factory_selects_contriever_collator(tokenizer) -> None:
     config = DataConfig(data_files="unused.jsonl")
     collator = build_collator(tokenizer, MethodConfig(name="contriever"), config)
     assert isinstance(collator, ContrieverCollator)
+
+
+def test_contrastive_collator_builds_labeled_pairs(tokenizer) -> None:
+    collator = ContrastiveCollator(
+        tokenizer,
+        max_seq_length=12,
+        text_column="sentence1",
+        text_pair_column="sentence2",
+        label_column="similar",
+    )
+    batch = collator(
+        [
+            {"sentence1": "the quick fox", "sentence2": "the brown fox", "similar": 1},
+            {"sentence1": "the lazy dog", "sentence2": "quick brown fox", "similar": 0},
+        ]
+    )
+    assert batch["anchor_input_ids"].shape[0] == 2
+    assert batch["other_input_ids"].shape[0] == 2
+    assert torch.equal(batch["labels"], torch.tensor([1.0, 0.0]))
+
+
+def test_contrastive_collator_rejects_nonbinary_labels(tokenizer) -> None:
+    collator = ContrastiveCollator(tokenizer)
+    with pytest.raises(ValueError, match="must be 0.*or 1"):
+        collator([{"text": "the fox", "text_pair": "the dog", "label": 0.5}])
+
+
+def test_factory_selects_contrastive_collator(tokenizer) -> None:
+    config = DataConfig(data_files="unused.jsonl")
+    collator = build_collator(tokenizer, MethodConfig(name="contrastive"), config)
+    assert isinstance(collator, ContrastiveCollator)
+
+
+def test_mnrl_collator_builds_positive_and_negative_columns(tokenizer) -> None:
+    collator = MNRLCollator(
+        tokenizer,
+        max_seq_length=12,
+        text_column="query",
+        text_pair_column="positive",
+        negative_columns=("negative",),
+    )
+    batch = collator(
+        [
+            {"query": "the quick fox", "positive": "the brown fox", "negative": "the dog"},
+            {"query": "the lazy dog", "positive": "the dog", "negative": "brown fox"},
+        ]
+    )
+    assert batch["anchor_input_ids"].shape[0] == 2
+    assert batch["candidate_input_ids"].shape[:2] == (2, 2)
+    assert batch["candidate_attention_mask"].shape == batch["candidate_input_ids"].shape
+
+
+@pytest.mark.parametrize("method", ["mnrl", "cmnrl"])
+def test_factory_selects_mnrl_collator(method: str, tokenizer) -> None:
+    config = DataConfig(data_files="unused.jsonl", negative_columns=["negative"])
+    collator = build_collator(tokenizer, MethodConfig(name=method), config)
+    assert isinstance(collator, MNRLCollator)

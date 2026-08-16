@@ -24,12 +24,16 @@ class PretenseTrainer(Trainer):
         "bow_loss",
         "condenser_mlm_loss",
         "contrastive_loss",
+        "mnrl_loss",
     )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._component_loss_totals = {}
         self._component_loss_batches = 0
         super().__init__(*args, **kwargs)
+        # MNRL, CMNRL, and Contriever compute a loss without a field named ``labels``. Generic
+        # Trainer inference otherwise treats those batches as prediction-only and omits eval_loss.
+        self.can_return_loss = True
 
     def compute_loss(
         self,

@@ -11,14 +11,22 @@ from .config import (
 )
 from .export import export_checkpoint, export_sentence_transformer, export_transformers
 from .modeling import (
+    CachedMNRLForPretraining,
     CoCondenserForPretraining,
     CondenserForPretraining,
+    ContrastiveForPretraining,
     ContrieverForPretraining,
     DupMAEForPretraining,
+    MNRLForPretraining,
     PretensePretrainingModel,
     RetroMAEForPretraining,
     create_pretraining_model,
     load_pretraining_model,
+)
+from .objectives import (
+    CachedMultipleNegativesRankingLoss,
+    ContrastiveLoss,
+    MultipleNegativesRankingLoss,
 )
 from .outputs import PretensePretrainingOutput
 from .trainer import PretenseTrainer
@@ -31,14 +39,20 @@ except PackageNotFoundError:
 
 __all__ = [
     "BackboneAdapter",
+    "CachedMNRLForPretraining",
+    "CachedMultipleNegativesRankingLoss",
     "CoCondenserForPretraining",
     "CondenserForPretraining",
+    "ContrastiveForPretraining",
+    "ContrastiveLoss",
     "ContrieverForPretraining",
     "DataConfig",
     "DupMAEForPretraining",
     "ExportConfig",
     "MethodConfig",
+    "MNRLForPretraining",
     "ModelConfig",
+    "MultipleNegativesRankingLoss",
     "PretenseConfig",
     "PretensePretrainingModel",
     "PretensePretrainingOutput",

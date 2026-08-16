@@ -13,5 +13,12 @@ All notable changes follow Keep a Changelog and Semantic Versioning.
   queue, resumable checkpoints, and mean-pooled Sentence Transformers exports.
 - Add regular component-loss logging, JSONL metrics, evaluation datasets, callbacks, checkpoint
   retention, best-model controls, and explicit resume validation.
+- Report evaluation loss for label-free objectives such as Contriever, MNRL, and CMNRL.
 - Support Sentence Transformers 5.2 through 6.x layouts and Transformers 5.x training arguments.
 - Validate and prepare caller-supplied datasets consistently with recipe-loaded datasets.
+- Add supervised pairwise contrastive training compatible with Sentence Transformers'
+  `ContrastiveLoss`, including three distance metrics, configurable margin, paired-data recipes,
+  component logging, checkpoints, and mean-pooled exports.
+- Add MNRL and GradCache-backed CMNRL with Sentence Transformers-compatible scoring, optional hard
+  negative columns, cosine or dot-product similarity, cross-device candidates, recipes,
+  programmatic training, component logging, checkpoints, and mean-pooled exports.

@@ -13,3 +13,4 @@ class PretensePretrainingOutput(ModelOutput):
     bow_loss: Tensor | None = None
     condenser_mlm_loss: Tensor | None = None
     contrastive_loss: Tensor | None = None
+    mnrl_loss: Tensor | None = None

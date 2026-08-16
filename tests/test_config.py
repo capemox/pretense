@@ -126,3 +126,52 @@ def test_contriever_recipe_parses() -> None:
     assert config.method.name == "contriever"
     assert config.method.queue_size == 131_072
     assert config.data.text_column == "text"
+
+
+def test_contrastive_recipe_parses() -> None:
+    recipe = Path(__file__).parents[1] / "recipes" / "contrastive.yaml"
+    config = PretenseConfig.from_yaml(recipe)
+    assert config.method.name == "contrastive"
+    assert config.method.contrastive_distance_metric == "cosine"
+    assert config.method.contrastive_margin == 0.5
+    assert config.data.text_pair_column == "sentence2"
+    assert config.data.label_column == "label"
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [("contrastive_distance_metric", "dot"), ("contrastive_margin", 0)],
+)
+def test_invalid_contrastive_config_is_rejected(field: str, invalid: object) -> None:
+    value = minimum_config()
+    value["method"] = {"name": "contrastive", field: invalid}
+    with pytest.raises(ValueError):
+        PretenseConfig.from_dict(value)
+
+
+@pytest.mark.parametrize("method", ["mnrl", "cmnrl"])
+def test_mnrl_recipes_parse(method: str) -> None:
+    recipe = Path(__file__).parents[1] / "recipes" / f"{method}.yaml"
+    config = PretenseConfig.from_yaml(recipe)
+    assert config.method.name == method
+    assert config.method.mnrl_scale == 20.0
+    assert config.data.text_pair_column == "positive"
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [("mnrl_scale", 0), ("mnrl_similarity", "euclidean"), ("cmnrl_mini_batch_size", 0)],
+)
+def test_invalid_mnrl_config_is_rejected(field: str, invalid: object) -> None:
+    value = minimum_config()
+    value["method"] = {"name": "mnrl", field: invalid}
+    with pytest.raises(ValueError):
+        PretenseConfig.from_dict(value)
+
+
+def test_duplicate_mnrl_negative_columns_are_rejected() -> None:
+    value = minimum_config()
+    value["method"] = {"name": "mnrl"}
+    value["data"]["negative_columns"] = ["negative", "negative"]
+    with pytest.raises(ValueError, match="cannot contain duplicates"):
+        PretenseConfig.from_dict(value)

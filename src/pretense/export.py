@@ -33,7 +33,11 @@ def export_transformers(
         tokenizer.save_pretrained(output)
     metadata = {
         "pretraining_method": model.method_config.name,
-        "pooling": "mean" if model.method_config.name == "contriever" else "cls",
+        "pooling": (
+            "mean"
+            if model.method_config.name in {"contriever", "contrastive", "mnrl", "cmnrl"}
+            else "cls"
+        ),
         "normalize_embeddings": (
             model.method_config.normalize_embeddings
             if model.method_config.name == "contriever"
@@ -99,7 +103,7 @@ def export_checkpoint(checkpoint: str | Path, output_dir: str | Path) -> tuple[P
 def _model_card(method: str, *, library_name: str) -> str:
     representation = (
         "Use attention-mask-aware mean pooling as the learned sentence representation."
-        if method == "contriever"
+        if method in {"contriever", "contrastive", "mnrl", "cmnrl"}
         else "Use the first token hidden state as the learned sentence representation."
     )
     return f"""---

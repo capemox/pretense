@@ -24,6 +24,31 @@ uv run python examples/retromae_then_sentence_transformers.py
 The example limits each phase to a manageable subset. These values demonstrate the API but are not
 intended to reproduce published benchmark scores.
 
+## Pairwise contrastive training
+
+[`contrastive_training.py`](contrastive_training.py) constructs a labeled pair dataset and the
+complete configuration directly in Python. It demonstrates the ST-compatible contrastive margin
+objective without requiring a YAML recipe:
+
+```bash
+uv run python examples/contrastive_training.py
+```
+
+Replace the inline demonstration data with a `datasets.Dataset` containing two configured text
+columns and a binary label column for a real run.
+
+## MNRL and cached MNRL
+
+[`mnrl_training.py`](mnrl_training.py) constructs query/positive/hard-negative data and trains MNRL
+entirely through the Python SDK:
+
+```bash
+uv run python examples/mnrl_training.py
+```
+
+Change `USE_CACHE` in the example to select CMNRL. With caching, the Trainer batch remains the full
+in-batch negative pool and `cmnrl_mini_batch_size` controls only the encoder activation chunk size.
+
 The output layout is:
 
 ```text

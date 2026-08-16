@@ -60,6 +60,18 @@ def prepare_pretraining_dataset(
     method: str,
 ) -> Dataset | IterableDataset:
     """Validate and normalize a loaded or programmatically supplied dataset."""
+    if method == "contrastive":
+        _require_columns(
+            dataset,
+            {config.text_column, config.text_pair_column, config.label_column},
+        )
+        return dataset
+    if method in {"mnrl", "cmnrl"}:
+        _require_columns(
+            dataset,
+            {config.text_column, config.text_pair_column, *config.negative_columns},
+        )
+        return dataset
     if method != "cocondenser":
         _require_columns(dataset, {config.text_column})
         return dataset
@@ -251,6 +263,55 @@ class MLMCollator(BaseCollator):
 
 
 @dataclass
+class ContrastiveCollator(BaseCollator):
+    text_pair_column: str = "text_pair"
+    label_column: str = "label"
+
+    def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        anchors = self._tokenize([str(example[self.text_column]) for example in examples])
+        others = self._tokenize([str(example[self.text_pair_column]) for example in examples])
+        try:
+            labels = torch.tensor(
+                [float(example[self.label_column]) for example in examples], dtype=torch.float
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError("Contrastive labels must be numeric 0 or 1 values.") from error
+        if labels.ne(0).logical_and(labels.ne(1)).any().item():
+            raise ValueError("Contrastive labels must be 0 for negative or 1 for positive pairs.")
+        return {
+            "anchor_input_ids": anchors["input_ids"],
+            "anchor_attention_mask": anchors["attention_mask"],
+            "other_input_ids": others["input_ids"],
+            "other_attention_mask": others["attention_mask"],
+            "labels": labels,
+        }
+
+
+@dataclass
+class MNRLCollator(BaseCollator):
+    text_pair_column: str = "text_pair"
+    negative_columns: tuple[str, ...] = ()
+
+    def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        anchors = self._tokenize([str(example[self.text_column]) for example in examples])
+        candidate_columns = (self.text_pair_column, *self.negative_columns)
+        candidate_texts = [
+            str(example[column]) for column in candidate_columns for example in examples
+        ]
+        candidates = self._tokenize(candidate_texts)
+        groups = len(candidate_columns)
+        batch_size = len(examples)
+        return {
+            "anchor_input_ids": anchors["input_ids"],
+            "anchor_attention_mask": anchors["attention_mask"],
+            "candidate_input_ids": candidates["input_ids"].reshape(groups, batch_size, -1),
+            "candidate_attention_mask": candidates["attention_mask"].reshape(
+                groups, batch_size, -1
+            ),
+        }
+
+
+@dataclass
 class ContrieverCollator(BaseCollator):
     augmentation: str = "delete"
     augmentation_probability: float = 0.10
@@ -355,6 +416,22 @@ def build_collator(
             augmentation_probability=method.augmentation_probability,
             crop_ratio_min=method.crop_ratio_min,
             crop_ratio_max=method.crop_ratio_max,
+        )
+    if method.name == "contrastive":
+        return ContrastiveCollator(
+            tokenizer=tokenizer,
+            max_seq_length=data.max_seq_length,
+            text_column=data.text_column,
+            text_pair_column=data.text_pair_column,
+            label_column=data.label_column,
+        )
+    if method.name in {"mnrl", "cmnrl"}:
+        return MNRLCollator(
+            tokenizer=tokenizer,
+            max_seq_length=data.max_seq_length,
+            text_column=data.text_column,
+            text_pair_column=data.text_pair_column,
+            negative_columns=tuple(data.negative_columns),
         )
     return MLMCollator(
         tokenizer=tokenizer,

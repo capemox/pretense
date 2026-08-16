@@ -1,0 +1,24 @@
+# GradCache MNRL: the effective Trainer batch is encoded in smaller activation mini-batches.
+model:
+  model_name_or_path: google-bert/bert-base-uncased
+method:
+  name: cmnrl
+  mnrl_scale: 20.0
+  mnrl_similarity: cosine
+  mnrl_gather_across_devices: false
+  cmnrl_mini_batch_size: 32
+data:
+  data_files: data/retrieval-pairs.jsonl
+  split: train
+  text_column: query
+  text_pair_column: positive
+  max_seq_length: 256
+training:
+  output_dir: outputs/cmnrl
+  per_device_train_batch_size: 256
+  learning_rate: 2.0e-5
+  num_train_epochs: 1
+  logging_steps: 10
+  save_steps: 100
+  save_total_limit: 2
+  bf16: true

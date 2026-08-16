@@ -6,7 +6,13 @@ from datasets import Dataset
 from transformers import BertConfig, BertForMaskedLM, TrainerCallback
 from transformers.trainer import TRAINING_ARGS_NAME
 
-from pretense import MethodConfig, PretenseConfig, RetroMAEForPretraining, train
+from pretense import (
+    MethodConfig,
+    PretenseConfig,
+    RetroMAEForPretraining,
+    create_pretraining_model,
+    train,
+)
 
 
 def tiny_model(vocab_size: int) -> RetroMAEForPretraining:
@@ -153,6 +159,114 @@ def test_gradient_checkpointing_is_enabled_on_encoder(tmp_path: Path, tokenizer)
         model=tiny_model(len(tokenizer)),
     )
     assert trainer.model.encoder.is_gradient_checkpointing
+
+
+def test_pairwise_contrastive_training(tmp_path: Path, tokenizer) -> None:
+    config = PretenseConfig.from_dict(
+        {
+            "model": {},
+            "method": {"name": "contrastive", "contrastive_margin": 0.5},
+            "data": {
+                "text_column": "sentence1",
+                "text_pair_column": "sentence2",
+                "label_column": "label",
+                "max_seq_length": 16,
+            },
+            "training": {
+                "output_dir": str(tmp_path),
+                "per_device_train_batch_size": 2,
+                "max_steps": 1,
+                "save_strategy": "no",
+                "logging_steps": 1,
+                "report_to": "none",
+            },
+            "export": {"transformers": False, "sentence_transformers": False},
+        }
+    )
+    raw_model = BertForMaskedLM(
+        BertConfig(
+            vocab_size=len(tokenizer),
+            hidden_size=16,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=32,
+            max_position_embeddings=32,
+        )
+    )
+    trainer = train(
+        config,
+        train_dataset=Dataset.from_dict(
+            {
+                "sentence1": ["the quick fox", "the lazy dog"],
+                "sentence2": ["the brown fox", "quick brown fox"],
+                "label": [1, 0],
+            }
+        ),
+        tokenizer=tokenizer,
+        model=create_pretraining_model(config.method, raw_model),
+    )
+    assert trainer.state.global_step == 1
+    assert any("contrastive_loss" in record for record in trainer.state.log_history)
+
+
+@pytest.mark.parametrize("method", ["mnrl", "cmnrl"])
+def test_mnrl_training(method: str, tmp_path: Path, tokenizer) -> None:
+    config = PretenseConfig.from_dict(
+        {
+            "model": {},
+            "method": {"name": method, "cmnrl_mini_batch_size": 2},
+            "data": {
+                "text_column": "query",
+                "text_pair_column": "positive",
+                "negative_columns": ["negative"],
+                "max_seq_length": 16,
+            },
+            "training": {
+                "output_dir": str(tmp_path),
+                "per_device_train_batch_size": 4,
+                "max_steps": 1,
+                "save_strategy": "no",
+                "eval_strategy": "steps",
+                "eval_steps": 1,
+                "logging_steps": 1,
+                "gradient_checkpointing": method == "cmnrl",
+                "report_to": "none",
+            },
+            "export": {"transformers": False, "sentence_transformers": False},
+        }
+    )
+    raw_model = BertForMaskedLM(
+        BertConfig(
+            vocab_size=len(tokenizer),
+            hidden_size=16,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=32,
+            max_position_embeddings=32,
+        )
+    )
+    trainer = train(
+        config,
+        train_dataset=Dataset.from_dict(
+            {
+                "query": ["quick fox", "lazy dog", "brown fox", "quick dog"],
+                "positive": ["brown fox", "the dog", "the fox", "lazy dog"],
+                "negative": ["the dog", "brown fox", "lazy dog", "the fox"],
+            }
+        ),
+        eval_dataset=Dataset.from_dict(
+            {
+                "query": ["quick fox", "lazy dog", "brown fox", "quick dog"],
+                "positive": ["brown fox", "the dog", "the fox", "lazy dog"],
+                "negative": ["the dog", "brown fox", "lazy dog", "the fox"],
+            }
+        ),
+        tokenizer=tokenizer,
+        model=create_pretraining_model(config.method, raw_model),
+    )
+    assert trainer.state.global_step == 1
+    assert any("mnrl_loss" in record for record in trainer.state.log_history)
+    assert any("eval_loss" in record for record in trainer.state.log_history)
 
 
 def test_programmatic_model_must_match_config(tmp_path: Path, tokenizer) -> None:

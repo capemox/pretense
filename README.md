@@ -3,9 +3,9 @@
 Pretraining sentence transformers with retrieval-oriented objectives.
 
 Pretense provides modern Hugging Face implementations of RetroMAE, DupMAE, Condenser, coCondenser,
-and Contriever. It trains through `transformers.Trainer`, reads `datasets` sources, supports
-distributed training through Accelerate, and exports models that load directly in both
-Transformers and Sentence Transformers.
+Contriever, supervised pairwise contrastive training, MNRL, and cached MNRL (CMNRL). It trains through
+`transformers.Trainer`, reads `datasets` sources, supports distributed training through Accelerate,
+and exports models that load directly in both Transformers and Sentence Transformers.
 
 The PyPI distribution, Python namespace, and command-line application are all named `pretense`.
 
@@ -63,8 +63,9 @@ sentence_model = SentenceTransformer("outputs/retromae/exports/sentence-transfor
 ```
 
 RetroMAE, DupMAE, Condenser, and coCondenser exports use the first token (CLS-equivalent) as the
-learned sentence representation. Contriever exports use attention-mask-aware mean pooling and can
-optionally include normalization when it was enabled during pretraining.
+learned sentence representation. Contriever, pairwise contrastive, MNRL, and CMNRL exports use
+attention-mask-aware mean pooling. Contriever can optionally include normalization when it was
+enabled during pretraining.
 
 ## Supported methods
 
@@ -75,6 +76,9 @@ optionally include normalization when it was enabled during pretraining.
 | Condenser | skip-connected head MLM + late MLM | `text` |
 | coCondenser | Condenser + paired-span, cross-device contrastive loss | documents or paired spans |
 | Contriever | augmented-view MoCo contrastive learning | `text` |
+| Contrastive | supervised pairwise margin loss | two text columns + binary label |
+| MNRL | paired retrieval ranking with in-batch and optional explicit negatives | query + positive, optionally negative columns |
+| CMNRL | memory-efficient GradCache MNRL | query + positive, optionally negative columns |
 
 BERT, RoBERTa, ModernBERT, and DeBERTa-v3 (the Transformers `deberta-v2` model type) are certified.
 Other masked language models can be added through `BackboneAdapter` and
@@ -102,6 +106,16 @@ negative queue are stored in training checkpoints, while clean exports contain o
 encoder and the correct mean-pooling configuration. See `recipes/contriever.yaml` for the reference
 settings.
 
+Pairwise contrastive training matches Sentence Transformers' `ContrastiveLoss` equation. It accepts
+positive labels of `1`, negative labels of `0`, configurable cosine/Euclidean/Manhattan distance,
+and a configurable margin. See `recipes/contrastive.yaml` for the expected paired-data schema.
+
+MNRL matches Sentence Transformers' core `MultipleNegativesRankingLoss` behavior. CMNRL computes
+the same objective with GradCache so a large negative pool can be encoded in smaller activation
+mini-batches. Both accept query/positive pairs and any number of explicit negative columns; avoid
+duplicate positives within a batch because they are treated as negatives for other queries. See
+`recipes/mnrl.yaml`, `recipes/cmnrl.yaml`, and the programmatic examples.
+
 ## Development
 
 ```bash
@@ -122,4 +136,10 @@ The implementation is informed by the papers and Apache-2.0 reference code for
 [Condenser/coCondenser](https://github.com/luyug/Condenser), and the archived reference code for
 [Contriever](https://github.com/facebookresearch/contriever), introduced in
 [Unsupervised Dense Information Retrieval with Contrastive Learning](https://arxiv.org/abs/2112.09118).
+The pairwise contrastive objective follows
+[Dimensionality Reduction by Learning an Invariant Mapping](https://doi.org/10.1109/CVPR.2006.100).
+MNRL follows the in-batch sampled-softmax objective described in
+[Efficient Natural Language Response Suggestion for Smart Reply](https://arxiv.org/abs/1705.00652),
+and CMNRL uses the method from
+[Scaling Deep Contrastive Learning Batch Size under Memory Limited Setup](https://arxiv.org/abs/2101.06983).
 Cite the corresponding paper when publishing results. Pretense itself is licensed under Apache-2.0.

@@ -6,8 +6,19 @@ from typing import Any, Literal
 
 import yaml
 
-MethodName = Literal["retromae", "dupmae", "condenser", "cocondenser", "contriever"]
+MethodName = Literal[
+    "retromae",
+    "dupmae",
+    "condenser",
+    "cocondenser",
+    "contriever",
+    "contrastive",
+    "mnrl",
+    "cmnrl",
+]
 ContrieverAugmentation = Literal["none", "delete", "mask", "replace", "shuffle"]
+ContrastiveDistanceMetric = Literal["cosine", "euclidean", "manhattan"]
+MNRLSimilarity = Literal["cosine", "dot"]
 
 
 @dataclass
@@ -30,9 +41,24 @@ class MethodConfig:
     crop_ratio_min: float = 0.10
     crop_ratio_max: float = 0.50
     normalize_embeddings: bool = False
+    contrastive_distance_metric: ContrastiveDistanceMetric = "cosine"
+    contrastive_margin: float = 0.5
+    mnrl_scale: float = 20.0
+    mnrl_similarity: MNRLSimilarity = "cosine"
+    mnrl_gather_across_devices: bool = False
+    cmnrl_mini_batch_size: int = 32
 
     def __post_init__(self) -> None:
-        supported = {"retromae", "dupmae", "condenser", "cocondenser", "contriever"}
+        supported = {
+            "retromae",
+            "dupmae",
+            "condenser",
+            "cocondenser",
+            "contriever",
+            "contrastive",
+            "mnrl",
+            "cmnrl",
+        }
         if self.name not in supported:
             raise ValueError(
                 f"Unknown pretraining method {self.name!r}; choose from {sorted(supported)}."
@@ -60,6 +86,18 @@ class MethodConfig:
             raise ValueError("augmentation_probability must be at least 0 and less than 1.")
         if not 0 < self.crop_ratio_min <= self.crop_ratio_max <= 1:
             raise ValueError("Crop ratios must satisfy 0 < crop_ratio_min <= crop_ratio_max <= 1.")
+        if self.contrastive_distance_metric not in {"cosine", "euclidean", "manhattan"}:
+            raise ValueError(
+                f"Unknown contrastive distance metric: {self.contrastive_distance_metric!r}."
+            )
+        if self.contrastive_margin <= 0:
+            raise ValueError("contrastive_margin must be positive.")
+        if self.mnrl_scale <= 0:
+            raise ValueError("mnrl_scale must be positive.")
+        if self.mnrl_similarity not in {"cosine", "dot"}:
+            raise ValueError(f"Unknown MNRL similarity: {self.mnrl_similarity!r}.")
+        if self.cmnrl_mini_batch_size < 1:
+            raise ValueError("cmnrl_mini_batch_size must be positive.")
 
 
 @dataclass
@@ -85,6 +123,9 @@ class DataConfig:
     data_files: str | list[str] | dict[str, str | list[str]] | None = None
     split: str = "train"
     text_column: str = "text"
+    text_pair_column: str = "text_pair"
+    label_column: str = "label"
+    negative_columns: list[str] = field(default_factory=list)
     spans_column: str | None = None
     document_id_column: str | None = None
     max_seq_length: int = 512
@@ -94,6 +135,14 @@ class DataConfig:
     def __post_init__(self) -> None:
         if self.max_seq_length < 4:
             raise ValueError("max_seq_length must be at least 4.")
+        if len(self.negative_columns) != len(set(self.negative_columns)):
+            raise ValueError("data.negative_columns cannot contain duplicates.")
+        reserved = {self.text_column, self.text_pair_column}
+        overlap = reserved.intersection(self.negative_columns)
+        if overlap:
+            raise ValueError(
+                f"data.negative_columns must differ from the text columns: {sorted(overlap)}"
+            )
 
 
 @dataclass

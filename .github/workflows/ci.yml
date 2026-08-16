@@ -27,7 +27,11 @@ jobs:
       - run: uv run torchrun --standalone --nproc-per-node=2 tests/distributed/cocondenser_smoke.py
       - run: uv build --no-sources
       - run: uv run twine check dist/*
-      - run: uv run --refresh --with dist/*.whl --no-project python -c "import pretense"
+      - name: Smoke-test the installed wheel API
+        run: >-
+          uv run --refresh --with dist/*.whl --no-project python -c
+          "from pretense import ContrastiveLoss, MultipleNegativesRankingLoss,
+          CachedMultipleNegativesRankingLoss"
 
   dependency-floor:
     runs-on: ubuntu-latest
@@ -42,3 +46,6 @@ jobs:
           uv pip install --python .venv-floor/bin/python
           --constraint tests/constraints/lowest.txt --editable ".[dev]"
       - run: .venv-floor/bin/python -m pytest
+      - run: >-
+          .venv-floor/bin/torchrun --standalone --nproc-per-node=2
+          tests/distributed/cocondenser_smoke.py

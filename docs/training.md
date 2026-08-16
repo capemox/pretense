@@ -25,7 +25,7 @@ training:
 `logging_steps`, `save_steps`, and `eval_steps` accept either an integer number of update steps or a
 ratio below one. Normal Trainer logs go to the console and `trainer.state.log_history`. Pretense
 also appends each record to `OUTPUT_DIR/training_log.jsonl`, including the method's component losses
-such as `encoder_mlm_loss`, `decoder_mlm_loss`, and `contrastive_loss` when applicable. Set
+such as `encoder_mlm_loss`, `decoder_mlm_loss`, `contrastive_loss`, and `mnrl_loss` when applicable. Set
 `report_to` to an installed Trainer integration such as `tensorboard` or `wandb` to use it; the
 default is `none`, so no external service is contacted unexpectedly.
 
@@ -89,5 +89,9 @@ trainer = train(
 ```
 
 Iterable/streaming datasets require a positive `max_steps`, because they do not have a known epoch
-length. Caller-supplied datasets must contain the configured `text_column`; coCondenser datasets
-also support the same `spans_column` and `document_id_column` preparation as recipe-loaded data.
+length. Caller-supplied datasets must contain the columns required by the selected method.
+Pairwise contrastive training uses `text_column`, `text_pair_column`, and `label_column`;
+MNRL and CMNRL use `text_column` as the anchor, `text_pair_column` as the positive, and each entry
+in `negative_columns` as an optional explicit-negative column;
+coCondenser also supports the same `spans_column` and `document_id_column` preparation as
+recipe-loaded data.

@@ -72,8 +72,9 @@ method accepting `input_ids`, `attention_mask`, `labels`, `output_hidden_states`
 It must return a `MaskedLMOutput`-compatible object. It can be defined entirely in the user's code;
 registration with `AutoModel`, saving it first, and uploading it are not required.
 
-Contriever uses the same programmatic model path. Construct it with the exact `config.method`
-instance because queue size and momentum settings are part of the model's resumable state:
+Contriever, pairwise contrastive training, MNRL, and CMNRL use the same programmatic model path.
+Construct the model with the exact `config.method` instance so all objective settings are preserved
+in its resumable state:
 
 ```python
 model = create_pretraining_model(config.method, raw_model, adapter=MyAdapter())

@@ -1,0 +1,25 @@
+# In-batch Multiple Negatives Ranking Loss with one explicit hard-negative column.
+model:
+  model_name_or_path: google-bert/bert-base-uncased
+method:
+  name: mnrl
+  mnrl_scale: 20.0
+  mnrl_similarity: cosine
+  mnrl_gather_across_devices: false
+data:
+  data_files: data/retrieval-triplets.jsonl
+  split: train
+  text_column: query
+  text_pair_column: positive
+  negative_columns:
+    - negative
+  max_seq_length: 256
+training:
+  output_dir: outputs/mnrl
+  per_device_train_batch_size: 64
+  learning_rate: 2.0e-5
+  num_train_epochs: 1
+  logging_steps: 50
+  save_steps: 500
+  save_total_limit: 2
+  bf16: true

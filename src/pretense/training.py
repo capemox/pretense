@@ -46,7 +46,12 @@ def train(
         tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_name, trust_remote_code=config.model.trust_remote_code
         )
-    needs_mask_token = config.method.name != "contriever" or config.method.augmentation == "mask"
+    needs_mask_token = config.method.name in {
+        "retromae",
+        "dupmae",
+        "condenser",
+        "cocondenser",
+    } or (config.method.name == "contriever" and config.method.augmentation == "mask")
     if needs_mask_token and tokenizer.mask_token_id is None:
         raise ValueError("Pretense requires a tokenizer with a mask token.")
     if tokenizer.pad_token_id is None:

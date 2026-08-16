@@ -15,6 +15,11 @@ from transformers import AutoConfig, AutoModelForMaskedLM, PreTrainedModel
 
 from .backbones import BackboneAdapter, build_transformer_stack, get_backbone_adapter
 from .config import MethodConfig
+from .objectives import (
+    CachedMultipleNegativesRankingLoss,
+    ContrastiveLoss,
+    MultipleNegativesRankingLoss,
+)
 from .outputs import PretensePretrainingOutput
 
 
@@ -461,12 +466,190 @@ class ContrieverForPretraining(PretensePretrainingModel):
         )
 
 
+class ContrastiveForPretraining(PretensePretrainingModel):
+    """Supervised pairwise contrastive training compatible with ST's ContrastiveLoss."""
+
+    method_name = "contrastive"
+
+    def __init__(
+        self,
+        encoder: PreTrainedModel,
+        method_config: MethodConfig,
+        adapter: BackboneAdapter | None = None,
+    ) -> None:
+        super().__init__(encoder, method_config, adapter)
+        # The masked-language-model head is not part of this objective or the clean export.
+        self.encoder.requires_grad_(False)
+        self.adapter.backbone(self.encoder).requires_grad_(True)
+        self.objective = ContrastiveLoss(
+            distance_metric=method_config.contrastive_distance_metric,
+            margin=method_config.contrastive_margin,
+        )
+
+    def _mean_encode(self, input_ids: Tensor, attention_mask: Tensor) -> Tensor:
+        output = self.adapter.backbone(self.encoder)(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+        if isinstance(output, Tensor):
+            hidden = output
+        elif hasattr(output, "last_hidden_state"):
+            hidden = output.last_hidden_state
+        else:
+            hidden = output[0]
+        mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
+        return (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
+
+    def forward(
+        self,
+        anchor_input_ids: Tensor,
+        anchor_attention_mask: Tensor,
+        other_input_ids: Tensor,
+        other_attention_mask: Tensor,
+        labels: Tensor,
+        **kwargs: Tensor,
+    ) -> PretensePretrainingOutput:
+        del kwargs
+        anchor = self._mean_encode(anchor_input_ids, anchor_attention_mask)
+        other = self._mean_encode(other_input_ids, other_attention_mask)
+        contrastive_loss = self.objective(anchor, other, labels)
+        return PretensePretrainingOutput(
+            loss=contrastive_loss,
+            sentence_embedding=anchor,
+            contrastive_loss=contrastive_loss,
+        )
+
+
+class _MNRLForPretraining(PretensePretrainingModel):
+    def __init__(
+        self,
+        encoder: PreTrainedModel,
+        method_config: MethodConfig,
+        adapter: BackboneAdapter | None = None,
+    ) -> None:
+        super().__init__(encoder, method_config, adapter)
+        self.encoder.requires_grad_(False)
+        self.adapter.backbone(self.encoder).requires_grad_(True)
+
+    def _mean_encode(self, input_ids: Tensor, attention_mask: Tensor) -> Tensor:
+        output = self.adapter.backbone(self.encoder)(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+        if isinstance(output, Tensor):
+            hidden = output
+        elif hasattr(output, "last_hidden_state"):
+            hidden = output.last_hidden_state
+        else:
+            hidden = output[0]
+        mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
+        return (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
+
+    @staticmethod
+    def _validate_candidates(
+        anchor_input_ids: Tensor,
+        candidate_input_ids: Tensor,
+        candidate_attention_mask: Tensor,
+    ) -> None:
+        if candidate_input_ids.ndim != 3 or candidate_attention_mask.ndim != 3:
+            raise ValueError("MNRL candidates must have shape [columns, batch, sequence].")
+        if candidate_input_ids.shape != candidate_attention_mask.shape:
+            raise ValueError("MNRL candidate IDs and attention masks must have matching shapes.")
+        if candidate_input_ids.shape[0] < 1:
+            raise ValueError("MNRL requires a positive candidate column.")
+        if candidate_input_ids.shape[1] != anchor_input_ids.shape[0]:
+            raise ValueError("MNRL anchor and candidate columns must use the same batch size.")
+
+
+class MNRLForPretraining(_MNRLForPretraining):
+    method_name = "mnrl"
+
+    def __init__(
+        self,
+        encoder: PreTrainedModel,
+        method_config: MethodConfig,
+        adapter: BackboneAdapter | None = None,
+    ) -> None:
+        super().__init__(encoder, method_config, adapter)
+        self.objective = MultipleNegativesRankingLoss(
+            scale=method_config.mnrl_scale,
+            similarity=method_config.mnrl_similarity,
+            gather_across_devices=method_config.mnrl_gather_across_devices,
+        )
+
+    def forward(
+        self,
+        anchor_input_ids: Tensor,
+        anchor_attention_mask: Tensor,
+        candidate_input_ids: Tensor,
+        candidate_attention_mask: Tensor,
+        **kwargs: Tensor,
+    ) -> PretensePretrainingOutput:
+        del kwargs
+        self._validate_candidates(
+            anchor_input_ids, candidate_input_ids, candidate_attention_mask
+        )
+        anchor = self._mean_encode(anchor_input_ids, anchor_attention_mask)
+        candidates = [
+            self._mean_encode(ids, mask)
+            for ids, mask in zip(
+                candidate_input_ids, candidate_attention_mask, strict=True
+            )
+        ]
+        mnrl_loss = self.objective(anchor, candidates[0], *candidates[1:])
+        return PretensePretrainingOutput(
+            loss=mnrl_loss,
+            sentence_embedding=anchor,
+            mnrl_loss=mnrl_loss,
+        )
+
+
+class CachedMNRLForPretraining(_MNRLForPretraining):
+    method_name = "cmnrl"
+
+    def __init__(
+        self,
+        encoder: PreTrainedModel,
+        method_config: MethodConfig,
+        adapter: BackboneAdapter | None = None,
+    ) -> None:
+        super().__init__(encoder, method_config, adapter)
+        self.objective = CachedMultipleNegativesRankingLoss(
+            scale=method_config.mnrl_scale,
+            similarity=method_config.mnrl_similarity,
+            mini_batch_size=method_config.cmnrl_mini_batch_size,
+            gather_across_devices=method_config.mnrl_gather_across_devices,
+        )
+
+    def forward(
+        self,
+        anchor_input_ids: Tensor,
+        anchor_attention_mask: Tensor,
+        candidate_input_ids: Tensor,
+        candidate_attention_mask: Tensor,
+        **kwargs: Tensor,
+    ) -> PretensePretrainingOutput:
+        del kwargs
+        self._validate_candidates(
+            anchor_input_ids, candidate_input_ids, candidate_attention_mask
+        )
+        features = [(anchor_input_ids, anchor_attention_mask)]
+        features.extend(
+            zip(candidate_input_ids, candidate_attention_mask, strict=True)
+        )
+        mnrl_loss = self.objective(self._mean_encode, features)
+        return PretensePretrainingOutput(loss=mnrl_loss, mnrl_loss=mnrl_loss)
+
+
 MODEL_CLASSES: dict[str, type[PretensePretrainingModel]] = {
     "retromae": RetroMAEForPretraining,
     "dupmae": DupMAEForPretraining,
     "condenser": CondenserForPretraining,
     "cocondenser": CoCondenserForPretraining,
     "contriever": ContrieverForPretraining,
+    "contrastive": ContrastiveForPretraining,
+    "mnrl": MNRLForPretraining,
+    "cmnrl": CachedMNRLForPretraining,
 }
 
 
