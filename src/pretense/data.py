@@ -44,6 +44,29 @@ class BaseCollator:
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
         raise NotImplementedError
 
+    def _require_columns(
+        self,
+        examples: list[dict[str, Any]],
+        required: dict[str, str],
+    ) -> None:
+        if not examples:
+            raise ValueError(f"{type(self).__name__} cannot collate an empty batch.")
+        missing = {
+            column: argument
+            for column, argument in required.items()
+            if any(column not in example for example in examples)
+        }
+        if missing:
+            configured = ", ".join(
+                f"{column!r} (configured by {argument})"
+                for column, argument in missing.items()
+            )
+            available = sorted({column for example in examples for column in example})
+            raise ValueError(
+                f"{type(self).__name__} requires {configured}, but the batch is missing "
+                f"the configured column. Available columns: {available}."
+            )
+
     def _tokenize(self, texts: list[str], *, add_special_tokens: bool = True) -> dict[str, Tensor]:
         return self.tokenizer(
             texts,
@@ -63,6 +86,7 @@ class MAECollator(BaseCollator):
     include_bow: bool = False
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        self._require_columns(examples, {self.text_column: "text_column"})
         batch = self._tokenize([str(example[self.text_column]) for example in examples])
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
@@ -113,6 +137,8 @@ class MLMCollator(BaseCollator):
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
         if self.paired:
+            if not examples:
+                self._require_columns(examples, {})
             pairs: list[str | list[int]] = []
             for example in examples:
                 if self.spans_column and self.spans_column in example:
@@ -120,6 +146,7 @@ class MLMCollator(BaseCollator):
                 elif "spans" in example:
                     spans = example["spans"]
                 else:
+                    self._require_columns([example], {self.text_column: "text_column"})
                     spans = self._split_document(str(example[self.text_column]))
                 if len(spans) < 2:
                     raise ValueError("Each coCondenser document must yield at least two spans.")
@@ -149,6 +176,7 @@ class MLMCollator(BaseCollator):
                 input_ids, attention_mask = batch["input_ids"], batch["attention_mask"]
                 specials = batch["special_tokens_mask"] | ~attention_mask.bool()
         else:
+            self._require_columns(examples, {self.text_column: "text_column"})
             batch = self._tokenize([str(example[self.text_column]) for example in examples])
             input_ids, attention_mask = batch["input_ids"], batch["attention_mask"]
             specials = batch["special_tokens_mask"] | ~attention_mask.bool()
@@ -162,6 +190,14 @@ class ContrastiveCollator(BaseCollator):
     label_column: str = "label"
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        self._require_columns(
+            examples,
+            {
+                self.text_column: "text_column",
+                self.text_pair_column: "text_pair_column",
+                self.label_column: "label_column",
+            },
+        )
         anchors = self._tokenize([str(example[self.text_column]) for example in examples])
         others = self._tokenize([str(example[self.text_pair_column]) for example in examples])
         try:
@@ -187,6 +223,14 @@ class MNRLCollator(BaseCollator):
     negative_columns: tuple[str, ...] = ()
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        self._require_columns(
+            examples,
+            {
+                self.text_column: "text_column",
+                self.text_pair_column: "text_pair_column",
+                **{column: "negative_columns" for column in self.negative_columns},
+            },
+        )
         anchors = self._tokenize([str(example[self.text_column]) for example in examples])
         candidate_columns = (self.text_pair_column, *self.negative_columns)
         candidate_texts = [
@@ -224,8 +268,12 @@ class SimCSECollator(BaseCollator):
             raise ValueError("SimCSE's MLM objective requires a tokenizer with a mask token.")
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
-        if not examples:
-            raise ValueError("SimCSE cannot collate an empty batch.")
+        required = {self.text_column: "text_column"}
+        if self.mode == "supervised":
+            required[self.text_pair_column] = "text_pair_column"
+        if self.hard_negative_column is not None:
+            required[self.hard_negative_column] = "hard_negative_column"
+        self._require_columns(examples, required)
         anchors = [str(example[self.text_column]) for example in examples]
         columns = [anchors]
         if self.mode == "unsupervised":
@@ -316,6 +364,7 @@ class ContrieverCollator(BaseCollator):
         return batch["input_ids"], batch["attention_mask"]
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        self._require_columns(examples, {self.text_column: "text_column"})
         payload = self.max_seq_length - self.tokenizer.num_special_tokens_to_add(pair=False)
         query_views: list[list[int]] = []
         key_views: list[list[int]] = []

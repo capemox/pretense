@@ -149,6 +149,37 @@ def test_factory_rejects_duplicate_or_overlapping_negative_columns(tokenizer) ->
         build_collator(tokenizer, method, negative_columns=("text_pair",))
 
 
+@pytest.mark.parametrize(
+    ("collator", "example", "missing_column", "configuration_argument"),
+    [
+        (MAECollator, {"sentence": "the fox"}, "text", "text_column"),
+        (MNRLCollator, {"text": "the fox"}, "text_pair", "text_pair_column"),
+        (
+            ContrastiveCollator,
+            {"text": "the fox", "text_pair": "the dog"},
+            "label",
+            "label_column",
+        ),
+    ],
+)
+def test_collators_report_missing_columns(
+    collator, example, missing_column: str, configuration_argument: str, tokenizer
+) -> None:
+    with pytest.raises(ValueError) as raised:
+        collator(tokenizer)([example])
+
+    assert repr(missing_column) in str(raised.value)
+    assert configuration_argument in str(raised.value)
+    assert "Available columns" in str(raised.value)
+
+
+def test_supervised_simcse_reports_a_missing_pair_column(tokenizer) -> None:
+    collator = SimCSECollator(tokenizer, mode="supervised")
+
+    with pytest.raises(ValueError, match="'text_pair'.*text_pair_column"):
+        collator([{"text": "the fox"}])
+
+
 def test_unsupervised_simcse_duplicates_sentences_for_dropout_views(tokenizer) -> None:
     collator = SimCSECollator(tokenizer, max_seq_length=12)
     batch = collator([{"text": "the quick fox"}, {"text": "the lazy dog"}])
