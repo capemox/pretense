@@ -24,7 +24,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy --python-version ${{ matrix.python-version }} src/pretense
       - run: uv run pytest --cov=pretense
-      - run: uv run torchrun --standalone --nproc-per-node=2 tests/distributed/cocondenser_smoke.py
+      - name: Distributed objective smoke test
+        timeout-minutes: 5
+        run: >-
+          uv run torchrun --standalone --nproc-per-node=2
+          tests/distributed/cocondenser_smoke.py
       - run: uv build --no-sources
       - run: uv run twine check dist/*
       - name: Smoke-test the installed wheel API
@@ -47,6 +51,8 @@ jobs:
           uv pip install --python .venv-floor/bin/python
           --constraint tests/constraints/lowest.txt --editable ".[dev]"
       - run: .venv-floor/bin/python -m pytest
-      - run: >-
+      - name: Dependency-floor distributed objective smoke test
+        timeout-minutes: 5
+        run: >-
           .venv-floor/bin/torchrun --standalone --nproc-per-node=2
           tests/distributed/cocondenser_smoke.py

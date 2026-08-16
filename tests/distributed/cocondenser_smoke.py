@@ -1,6 +1,7 @@
 """Two-process CPU smoke test, invoked explicitly by CI rather than pytest."""
 
 import os
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -31,17 +32,22 @@ def tiny_encoder() -> BertForMaskedLM:
 
 
 def main() -> None:
-    dist.init_process_group("gloo")
+    dist.init_process_group("gloo", timeout=timedelta(seconds=60))
     rank = int(os.environ["RANK"])
+
+    def stage(message: str) -> None:
+        print(f"[rank {rank}] {message}", flush=True)
+
+    stage("process group initialized")
     torch.manual_seed(13)
-    encoder = tiny_encoder()
-    model = CoCondenserForPretraining(encoder, MethodConfig(name="cocondenser"))
+    model = CoCondenserForPretraining(tiny_encoder(), MethodConfig(name="cocondenser"))
     input_ids = torch.randint(5, 30, (2, 8))
     input_ids[:, 0] = 2
     input_ids += rank % 2
     labels = torch.full_like(input_ids, -100)
     labels[:, 2] = input_ids[:, 2]
     input_ids[:, 2] = 4
+    stage("coCondenser forward")
     output = model(
         input_ids=input_ids,
         attention_mask=torch.ones_like(input_ids),
@@ -50,9 +56,10 @@ def main() -> None:
     assert output.contrastive_loss is not None and torch.isfinite(output.contrastive_loss)
     output.loss.backward()
     assert model.encoder.bert.embeddings.word_embeddings.weight.grad is not None
+    stage("coCondenser complete")
 
     contriever = ContrieverForPretraining(
-        encoder,
+        tiny_encoder(),
         MethodConfig(
             name="contriever",
             queue_size=8,
@@ -60,6 +67,7 @@ def main() -> None:
             normalize_embeddings=True,
         ),
     )
+    stage("Contriever DDP setup")
     distributed_contriever = DistributedDataParallel(contriever)
     query_ids = torch.randint(5, 30, (2, 8))
     key_ids = torch.randint(5, 30, (2, 8)) + rank % 2
@@ -77,11 +85,13 @@ def main() -> None:
     dist.broadcast(rank_zero_queue, src=0)
     assert torch.equal(contriever.queue, rank_zero_queue)
     assert contriever.encoder.bert.embeddings.word_embeddings.weight.grad is not None
+    stage("Contriever complete")
 
     for model_class, method_name in (
         (MNRLForPretraining, "mnrl"),
         (CachedMNRLForPretraining, "cmnrl"),
     ):
+        stage(f"{method_name.upper()} DDP setup")
         ranking_model = model_class(
             tiny_encoder(),
             MethodConfig(
@@ -103,7 +113,9 @@ def main() -> None:
         assert torch.isfinite(ranking_output.mnrl_loss)
         ranking_output.loss.backward()
         assert ranking_model.encoder.bert.embeddings.word_embeddings.weight.grad is not None
+        stage(f"{method_name.upper()} complete")
 
+    stage("SimCSE DDP setup")
     simcse = SimCSEForPretraining(tiny_encoder(), MethodConfig(name="simcse"))
     distributed_simcse = DistributedDataParallel(simcse)
     sentence_ids = torch.randint(5, 30, (2, 2, 8)) + rank % 2
@@ -117,6 +129,7 @@ def main() -> None:
     simcse_output.loss.backward()
     assert simcse.projection.weight.grad is not None
     assert simcse.encoder.bert.embeddings.word_embeddings.weight.grad is not None
+    stage("SimCSE complete")
     dist.barrier()
     dist.destroy_process_group()
 
