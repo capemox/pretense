@@ -5,10 +5,16 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset, IterableDataset
-from transformers import AutoTokenizer, PreTrainedTokenizerBase, TrainingArguments, set_seed
+from transformers import (
+    AutoTokenizer,
+    PreTrainedTokenizerBase,
+    TrainerCallback,
+    TrainingArguments,
+    set_seed,
+)
 
 from .config import PretenseConfig
-from .data import build_collator, load_pretraining_dataset
+from .data import build_collator, load_pretraining_dataset, prepare_pretraining_dataset
 from .export import export_sentence_transformer, export_transformers
 from .modeling import PretensePretrainingModel, load_pretraining_model
 from .trainer import PretenseTrainer
@@ -18,9 +24,12 @@ def train(
     config: PretenseConfig,
     *,
     train_dataset: Dataset | IterableDataset | None = None,
+    eval_dataset: Dataset | IterableDataset | None = None,
     tokenizer: PreTrainedTokenizerBase | None = None,
     model: PretensePretrainingModel | None = None,
+    callbacks: list[TrainerCallback] | None = None,
 ) -> PretenseTrainer:
+    config.validate()
     if config.method.name == "cocondenser" and config.training.gradient_accumulation_steps != 1:
         raise ValueError(
             "coCondenser requires gradient_accumulation_steps=1 because accumulation does not "
@@ -40,6 +49,8 @@ def train(
     needs_mask_token = config.method.name != "contriever" or config.method.augmentation == "mask"
     if needs_mask_token and tokenizer.mask_token_id is None:
         raise ValueError("Pretense requires a tokenizer with a mask token.")
+    if tokenizer.pad_token_id is None:
+        raise ValueError("Pretense requires a tokenizer with a padding token.")
     if model is None:
         if config.model.model_name_or_path is None:
             raise ValueError(
@@ -69,14 +80,24 @@ def train(
                 "model with create_pretraining_model(config.method, ...)."
             )
     dataset = (
-        train_dataset
+        prepare_pretraining_dataset(train_dataset, config.data, config.method.name)
         if train_dataset is not None
         else load_pretraining_dataset(config.data, config.method.name)
     )
+    prepared_eval_dataset = (
+        prepare_pretraining_dataset(eval_dataset, config.data, config.method.name)
+        if eval_dataset is not None
+        else None
+    )
+    if isinstance(dataset, IterableDataset) and config.training.max_steps <= 0:
+        raise ValueError("Streaming datasets require training.max_steps to be positive.")
+    if config.training.eval_strategy != "no" and eval_dataset is None:
+        raise ValueError("Pass eval_dataset when training.eval_strategy enables evaluation.")
     collator = build_collator(tokenizer, config.method, config.data)
     training_values: dict[str, Any] = dict(config.training.__dict__)
     training_values.pop("resume_from_checkpoint")
-    # Transformers 5 expresses ratios as a fractional warmup_steps value.
+    # Transformers 5 expresses a ratio as a fractional warmup_steps value. Its short-lived
+    # warmup_ratio alias was deprecated before being removed from later 5.x releases.
     training_values["warmup_steps"] = training_values.pop("warmup_ratio")
     if config.method.name == "cocondenser":
         training_values["dataloader_drop_last"] = True
@@ -88,8 +109,10 @@ def train(
         model=model,
         args=arguments,
         train_dataset=dataset,
+        eval_dataset=prepared_eval_dataset,
         data_collator=collator,
         processing_class=tokenizer,
+        callbacks=callbacks,
     )
     trainer.train(resume_from_checkpoint=config.training.resume_from_checkpoint)
     final_dir = Path(config.training.output_dir) / "final-checkpoint"

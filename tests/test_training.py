@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
 
 import pytest
 from datasets import Dataset
-from transformers import BertConfig, BertForMaskedLM
+from transformers import BertConfig, BertForMaskedLM, TrainerCallback
 from transformers.trainer import TRAINING_ARGS_NAME
 
 from pretense import MethodConfig, PretenseConfig, RetroMAEForPretraining, train
@@ -42,22 +43,40 @@ def training_config(output_dir: Path, max_steps: int) -> PretenseConfig:
     )
 
 
+class LogCounter(TrainerCallback):
+    def __init__(self) -> None:
+        self.count = 0
+
+    def on_log(self, *args, **kwargs) -> None:
+        self.count += 1
+
+
 def test_programmatic_dataset_checkpoint_and_resume(tmp_path: Path, tokenizer) -> None:
     dataset = Dataset.from_dict(
         {"text": ["the quick brown fox", "the lazy dog", "the fox", "the dog"]}
     )
     first_output = tmp_path / "first"
+    callback = LogCounter()
     trainer = train(
         training_config(first_output, 1),
         train_dataset=dataset,
         tokenizer=tokenizer,
         model=tiny_model(len(tokenizer)),
+        callbacks=[callback],
     )
     checkpoint = first_output / "checkpoint-1"
     assert trainer.state.global_step == 1
     assert (checkpoint / TRAINING_ARGS_NAME).is_file()
     assert (checkpoint / "trainer_state.json").is_file()
     assert (checkpoint / "optimizer.pt").is_file()
+    log_records = [
+        json.loads(line)
+        for line in (first_output / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    training_record = next(record for record in log_records if "loss" in record)
+    assert "encoder_mlm_loss" in training_record
+    assert "decoder_mlm_loss" in training_record
+    assert callback.count >= 1
 
     resumed_config = training_config(tmp_path / "resumed", 2)
     resumed_config.training.resume_from_checkpoint = str(checkpoint)
@@ -68,6 +87,72 @@ def test_programmatic_dataset_checkpoint_and_resume(tmp_path: Path, tokenizer) -
         model=tiny_model(len(tokenizer)),
     )
     assert resumed.state.global_step == 2
+
+
+def test_evaluation_and_checkpoint_retention(tmp_path: Path, tokenizer) -> None:
+    dataset = Dataset.from_dict(
+        {"text": ["the quick brown fox", "the lazy dog", "the fox", "the dog"]}
+    )
+    config = training_config(tmp_path, 2)
+    config.training.eval_strategy = "steps"
+    config.training.eval_steps = 1
+    config.training.save_total_limit = 1
+    trainer = train(
+        config,
+        train_dataset=dataset,
+        eval_dataset=dataset,
+        tokenizer=tokenizer,
+        model=tiny_model(len(tokenizer)),
+    )
+    assert any("eval_loss" in record for record in trainer.state.log_history)
+    assert [path.name for path in tmp_path.glob("checkpoint-*")] == ["checkpoint-2"]
+
+
+def test_evaluation_requires_dataset(tmp_path: Path, tokenizer) -> None:
+    config = training_config(tmp_path, 1)
+    config.training.eval_strategy = "steps"
+    with pytest.raises(ValueError, match="Pass eval_dataset"):
+        train(
+            config,
+            train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
+            tokenizer=tokenizer,
+            model=tiny_model(len(tokenizer)),
+        )
+
+
+def test_programmatic_dataset_columns_are_validated(tmp_path: Path, tokenizer) -> None:
+    with pytest.raises(ValueError, match="missing required columns.*text"):
+        train(
+            training_config(tmp_path, 1),
+            train_dataset=Dataset.from_dict({"body": ["the fox", "the dog"]}),
+            tokenizer=tokenizer,
+            model=tiny_model(len(tokenizer)),
+        )
+
+
+def test_mutated_weights_only_config_cannot_resume(tmp_path: Path, tokenizer) -> None:
+    config = training_config(tmp_path, 1)
+    config.training.save_only_model = True
+    config.training.resume_from_checkpoint = True
+    with pytest.raises(ValueError, match="cannot be resumed"):
+        train(
+            config,
+            train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
+            tokenizer=tokenizer,
+            model=tiny_model(len(tokenizer)),
+        )
+
+
+def test_gradient_checkpointing_is_enabled_on_encoder(tmp_path: Path, tokenizer) -> None:
+    config = training_config(tmp_path, 1)
+    config.training.gradient_checkpointing = True
+    trainer = train(
+        config,
+        train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
+        tokenizer=tokenizer,
+        model=tiny_model(len(tokenizer)),
+    )
+    assert trainer.model.encoder.is_gradient_checkpointing
 
 
 def test_programmatic_model_must_match_config(tmp_path: Path, tokenizer) -> None:

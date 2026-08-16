@@ -1,7 +1,29 @@
 import torch
+from datasets import Dataset
 
 from pretense.config import DataConfig, MethodConfig
-from pretense.data import ContrieverCollator, MAECollator, MLMCollator, build_collator
+from pretense.data import (
+    ContrieverCollator,
+    MAECollator,
+    MLMCollator,
+    build_collator,
+    prepare_pretraining_dataset,
+)
+
+
+def test_programmatic_cocondenser_rows_are_grouped() -> None:
+    dataset = Dataset.from_dict(
+        {
+            "document_id": [1, 1, 2],
+            "text": ["first span", "second span", "only span"],
+        }
+    )
+    prepared = prepare_pretraining_dataset(
+        dataset,
+        DataConfig(document_id_column="document_id"),
+        "cocondenser",
+    )
+    assert prepared.to_dict() == {"spans": [["first span", "second span"]]}
 
 
 def test_mae_collator_builds_independent_views(tokenizer) -> None:

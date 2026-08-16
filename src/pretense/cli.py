@@ -3,11 +3,28 @@ from typing import Annotated
 
 import typer
 
+from . import __version__
 from .config import PretenseConfig
 from .export import export_checkpoint
 from .training import train as run_training
 
 app = typer.Typer(help="Pretrain sentence transformers with retrieval-oriented objectives.")
+
+
+def _show_version(value: bool) -> None:
+    if value:
+        typer.echo(f"pretense {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool,
+        typer.Option("--version", callback=_show_version, is_eager=True, help="Show the version."),
+    ] = False,
+) -> None:
+    """Pretrain and export retrieval-oriented sentence encoders."""
 
 
 @app.command("train")

@@ -51,6 +51,15 @@ def load_pretraining_dataset(config: DataConfig, method: str) -> Dataset | Itera
             streaming=config.streaming,
         )
 
+    return prepare_pretraining_dataset(dataset, config, method)
+
+
+def prepare_pretraining_dataset(
+    dataset: Dataset | IterableDataset,
+    config: DataConfig,
+    method: str,
+) -> Dataset | IterableDataset:
+    """Validate and normalize a loaded or programmatically supplied dataset."""
     if method != "cocondenser":
         _require_columns(dataset, {config.text_column})
         return dataset

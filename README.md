@@ -12,11 +12,13 @@ The PyPI distribution, Python namespace, and command-line application are all na
 ## Installation
 
 ```bash
-uv sync --extra dev
+uv add pretense
 ```
 
 Python 3.10 or newer is required. CUDA-enabled PyTorch should be selected using the appropriate
 uv/PyTorch index for the target system.
+
+For development from a source checkout, use `uv sync --extra dev` instead.
 
 ## Train
 
@@ -38,7 +40,7 @@ trainer = train(config)
 
 For a complete Python workflow—from programmatic RetroMAE pretraining and stored checkpoints to
 reloading and fine-tuning the exported encoder with Sentence Transformers—see the
-[programmatic examples](examples/README.md).
+[programmatic examples](https://github.com/capemox/pretense/tree/main/examples).
 
 In-memory Hugging Face datasets, tokenizers, and Pretense models can be supplied directly for
 notebooks, tests, and custom data pipelines:
@@ -47,8 +49,10 @@ notebooks, tests, and custom data pipelines:
 trainer = train(config, train_dataset=dataset, tokenizer=tokenizer, model=model)
 ```
 
-Training produces resumable `checkpoint-*` directories, a final weights-only `final-checkpoint/`,
-and two clean exports:
+Training produces regular console and `training_log.jsonl` metrics, resumable `checkpoint-*`
+directories, a final weights-only `final-checkpoint/`, and two clean exports. See
+[training and checkpointing](https://github.com/capemox/pretense/blob/main/docs/training.md) for
+evaluation, retention, callbacks, experiment trackers, and recovery after interruption.
 
 ```python
 from transformers import AutoModel
@@ -78,11 +82,12 @@ Other masked language models can be added through `BackboneAdapter` and
 
 Unpublished or experimental models can be passed directly with `create_pretraining_model`; they do
 not need to be saved first, registered with `AutoModel`, or uploaded to the Hub. See
-[custom models](docs/custom-models.md).
+[custom models](https://github.com/capemox/pretense/blob/main/docs/custom-models.md).
 
 FlashAttention and other Transformers attention backends can be selected through
-`model.model_kwargs`. See [FlashAttention](docs/flash-attention.md) for YAML and Python examples,
-installation options, and limitations.
+`model.model_kwargs`. See
+[FlashAttention](https://github.com/capemox/pretense/blob/main/docs/flash-attention.md) for YAML and
+Python examples, installation options, and limitations.
 
 Pretense supports Sentence Transformers 5.x and 6.x model layouts.
 
@@ -107,7 +112,8 @@ uv build --no-sources
 ```
 
 Pretense targets objective and architecture parity, not guaranteed reproduction of paper benchmark
-scores. See [method notes](docs/methods.md) and [release documentation](docs/releasing.md).
+scores. See the [method notes](https://github.com/capemox/pretense/blob/main/docs/methods.md) and
+[release documentation](https://github.com/capemox/pretense/blob/main/docs/releasing.md).
 
 ## Attribution
 

@@ -29,6 +29,24 @@ def test_training_checkpoint_limit_round_trip() -> None:
     assert config.training.save_total_limit == 2
 
 
+def test_weights_only_checkpoint_cannot_be_resumed() -> None:
+    value = minimum_config()
+    value["training"] = {"save_only_model": True, "resume_from_checkpoint": True}
+    with pytest.raises(ValueError, match="cannot be resumed"):
+        PretenseConfig.from_dict(value)
+
+
+def test_hub_push_requires_a_matching_export() -> None:
+    value = minimum_config()
+    value["export"] = {
+        "push_to_hub": True,
+        "transformers": False,
+        "transformers_repo_id": "owner/model",
+    }
+    with pytest.raises(ValueError, match="Enable the Transformers export"):
+        PretenseConfig.from_dict(value)
+
+
 def test_model_kwargs_round_trip() -> None:
     value = minimum_config()
     value["model"]["model_kwargs"] = {

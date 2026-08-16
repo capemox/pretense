@@ -2276,7 +2276,7 @@ wheels = [
 
 [[package]]
 name = "pretense"
-version = "0.1.0.dev0"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
@@ -2300,7 +2300,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "accelerate", specifier = ">=1.1" },
+    { name = "accelerate", specifier = ">=1.3" },
     { name = "datasets", specifier = ">=2.16" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
@@ -2308,8 +2308,8 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "safetensors", specifier = ">=0.4" },
-    { name = "sentence-transformers", specifier = ">=5,<7" },
-    { name = "torch", specifier = ">=2.5" },
+    { name = "sentence-transformers", specifier = ">=5.2,<7" },
+    { name = "torch", specifier = ">=2.6" },
     { name = "transformers", specifier = ">=5,<6" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=6" },
     { name = "typer", specifier = ">=0.12" },

@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import importlib
 import json
 import shutil
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
-from sentence_transformers.sentence_transformer.modules import Normalize, Pooling, Transformer
 from transformers import AutoTokenizer
 
 from .modeling import PretensePretrainingModel
+
+try:
+    _st_modules = importlib.import_module("sentence_transformers.sentence_transformer.modules")
+except ImportError:  # Sentence Transformers 5.2-5.6
+    _st_modules = importlib.import_module("sentence_transformers.models")
+
+Normalize = _st_modules.Normalize
+Pooling = _st_modules.Pooling
+Transformer = _st_modules.Transformer
 
 
 def export_transformers(
@@ -53,7 +62,11 @@ def export_sentence_transformer(
     )
     transformer = Transformer(str(source))
     pooling_mode = metadata.get("pooling", "cls")
-    pooling = Pooling(transformer.get_embedding_dimension(), pooling_mode=pooling_mode)
+    if hasattr(transformer, "get_embedding_dimension"):
+        dimension = transformer.get_embedding_dimension()
+    else:  # Sentence Transformers 5.2
+        dimension = transformer.get_word_embedding_dimension()
+    pooling = Pooling(dimension, pooling_mode=pooling_mode)
     modules = [transformer, pooling]
     if metadata.get("normalize_embeddings", False):
         modules.append(Normalize())

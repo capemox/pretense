@@ -42,7 +42,11 @@ def test_checkpoint_and_transformers_export_round_trip(tmp_path: Path, tokenizer
     from sentence_transformers import SentenceTransformer
 
     sentence_model = SentenceTransformer(str(sentence_export), device="cpu")
-    assert sentence_model.get_embedding_dimension() == 16
+    if hasattr(sentence_model, "get_embedding_dimension"):
+        dimension = sentence_model.get_embedding_dimension()
+    else:
+        dimension = sentence_model.get_sentence_embedding_dimension()
+    assert dimension == 16
     assert "## Pretraining" in (sentence_export / "README.md").read_text(encoding="utf-8")
 
     texts = ["the quick brown fox", "the lazy dog"]

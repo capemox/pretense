@@ -2,9 +2,16 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from pretense import __version__
 from pretense.cli import app
 
 runner = CliRunner()
+
+
+def test_version() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == f"pretense {__version__}"
 
 
 def test_train_cli_parses_config_and_overrides(monkeypatch, tmp_path: Path) -> None:

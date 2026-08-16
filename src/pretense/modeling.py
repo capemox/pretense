@@ -59,6 +59,8 @@ class EnhancedDecoderLayer(nn.Module):
 
 
 class PretensePretrainingModel(PreTrainedModel):
+    supports_gradient_checkpointing = True
+
     method_name: str
     _supports_sdpa = True
 

@@ -28,3 +28,17 @@ jobs:
       - run: uv build --no-sources
       - run: uv run twine check dist/*
       - run: uv run --refresh --with dist/*.whl --no-project python -c "import pretense"
+
+  dependency-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.10"
+          enable-cache: true
+      - run: uv venv .venv-floor
+      - run: >-
+          uv pip install --python .venv-floor/bin/python
+          --constraint tests/constraints/lowest.txt --editable ".[dev]"
+      - run: .venv-floor/bin/python -m pytest

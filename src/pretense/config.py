@@ -107,11 +107,25 @@ class TrainingConfig:
     max_steps: int = -1
     warmup_ratio: float = 0.1
     gradient_accumulation_steps: int = 1
-    logging_steps: int = 10
-    save_steps: int = 500
+    max_grad_norm: float = 1.0
+    lr_scheduler_type: str = "linear"
+    gradient_checkpointing: bool = False
+    logging_strategy: str = "steps"
+    logging_steps: float = 10
+    logging_first_step: bool = False
+    log_level: str = "passive"
+    disable_tqdm: bool | None = None
+    run_name: str | None = None
+    save_steps: float = 500
     save_total_limit: int | None = None
+    save_only_model: bool = False
     eval_strategy: str = "no"
+    eval_steps: float | None = None
+    eval_on_start: bool = False
     save_strategy: str = "steps"
+    load_best_model_at_end: bool = False
+    metric_for_best_model: str | None = None
+    greater_is_better: bool | None = None
     seed: int = 42
     bf16: bool = False
     fp16: bool = False
@@ -119,6 +133,26 @@ class TrainingConfig:
     dataloader_drop_last: bool = False
     report_to: str | list[str] = "none"
     resume_from_checkpoint: str | bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.per_device_train_batch_size < 1 or self.per_device_eval_batch_size < 1:
+            raise ValueError("Training and evaluation batch sizes must be positive.")
+        if self.gradient_accumulation_steps < 1:
+            raise ValueError("gradient_accumulation_steps must be positive.")
+        if not 0 <= self.warmup_ratio <= 1:
+            raise ValueError("warmup_ratio must be between 0 and 1.")
+        if self.logging_strategy == "steps" and self.logging_steps <= 0:
+            raise ValueError("logging_steps must be positive when logging_strategy='steps'.")
+        if self.save_strategy == "steps" and self.save_steps <= 0:
+            raise ValueError("save_steps must be positive when save_strategy='steps'.")
+        if self.eval_strategy == "steps" and self.eval_steps is not None and self.eval_steps <= 0:
+            raise ValueError("eval_steps must be positive when provided.")
+        if self.save_total_limit is not None and self.save_total_limit < 1:
+            raise ValueError("save_total_limit must be positive when provided.")
+        if self.bf16 and self.fp16:
+            raise ValueError("bf16 and fp16 cannot both be enabled.")
+        if self.save_only_model and self.resume_from_checkpoint:
+            raise ValueError("save_only_model checkpoints cannot be resumed.")
 
 
 @dataclass
@@ -129,6 +163,23 @@ class ExportConfig:
     transformers_repo_id: str | None = None
     sentence_transformers_repo_id: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.push_to_hub and not (
+            self.transformers_repo_id or self.sentence_transformers_repo_id
+        ):
+            raise ValueError("Set at least one export repository ID when push_to_hub is enabled.")
+        if self.push_to_hub and self.transformers_repo_id and not self.transformers:
+            raise ValueError("Enable the Transformers export before pushing transformers_repo_id.")
+        if (
+            self.push_to_hub
+            and self.sentence_transformers_repo_id
+            and not self.sentence_transformers
+        ):
+            raise ValueError(
+                "Enable the Sentence Transformers export before pushing "
+                "sentence_transformers_repo_id."
+            )
+
 
 @dataclass
 class PretenseConfig:
@@ -137,6 +188,14 @@ class PretenseConfig:
     data: DataConfig
     training: TrainingConfig = field(default_factory=TrainingConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
+
+    def validate(self) -> None:
+        """Revalidate the mutable configuration before starting a run."""
+        self.model.__post_init__()
+        self.method.__post_init__()
+        self.data.__post_init__()
+        self.training.__post_init__()
+        self.export.__post_init__()
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> PretenseConfig:
