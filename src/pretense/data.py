@@ -105,11 +105,15 @@ class MLMCollator(BaseCollator):
     def _split_document(self, text: str) -> list[list[int]]:
         payload = self.max_seq_length - self.tokenizer.num_special_tokens_to_add(pair=False)
         ids = self.tokenizer(text, add_special_tokens=False)["input_ids"]
-        return [
+        chunks = [
             ids[index : index + payload]
             for index in range(0, len(ids), payload)
             if ids[index : index + payload]
         ]
+        if len(chunks) == 1 and len(ids) >= 2:
+            middle = len(ids) // 2
+            return [ids[:middle], ids[middle:]]
+        return chunks
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
         if self.paired:
@@ -124,30 +128,15 @@ class MLMCollator(BaseCollator):
                 if len(spans) < 2:
                     raise ValueError("Each coCondenser document must yield at least two spans.")
                 pairs.extend(random.sample(list(spans), 2))
-            if pairs and isinstance(pairs[0], list):
-                encoded = self.tokenizer.pad(
-                    [self.tokenizer.prepare_for_model(span) for span in pairs],
-                    padding=True,
-                    max_length=self.max_seq_length,
-                    return_tensors="pt",
-                )
-                input_ids = encoded["input_ids"]
-                attention_mask = encoded["attention_mask"]
-                specials = (
-                    torch.tensor(
-                        [
-                            self.tokenizer.get_special_tokens_mask(
-                                row.tolist(), already_has_special_tokens=True
-                            )
-                            for row in input_ids
-                        ]
-                    )
-                    | ~attention_mask.bool()
-                )
-            else:
-                batch = self._tokenize([str(value) for value in pairs])
-                input_ids, attention_mask = batch["input_ids"], batch["attention_mask"]
-                specials = batch["special_tokens_mask"] | ~attention_mask.bool()
+            texts = [
+                str(self.tokenizer.decode(value, skip_special_tokens=True))
+                if isinstance(value, list)
+                else str(value)
+                for value in pairs
+            ]
+            batch = self._tokenize(texts)
+            input_ids, attention_mask = batch["input_ids"], batch["attention_mask"]
+            specials = batch["special_tokens_mask"] | ~attention_mask.bool()
         else:
             batch = self._tokenize([str(example[self.text_column]) for example in examples])
             input_ids, attention_mask = batch["input_ids"], batch["attention_mask"]
