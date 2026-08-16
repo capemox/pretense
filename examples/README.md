@@ -24,6 +24,25 @@ uv run python examples/retromae_then_sentence_transformers.py
 The example limits each phase to a manageable subset. These values demonstrate the API but are not
 intended to reproduce published benchmark scores.
 
+The example writes the following directories:
+
+```text
+outputs/programmatic-retromae/
+├── pretraining/
+│   ├── checkpoint-*/                 # resumable Trainer state
+│   ├── final-checkpoint/             # encoder plus RetroMAE auxiliary weights
+│   └── exports/
+│       ├── transformers/             # clean Hugging Face encoder
+│       └── sentence-transformers/    # clean encoder plus CLS pooling
+└── sentence-transformers-finetuning/
+    ├── checkpoints/                  # ST Trainer checkpoints
+    └── final/                        # reloadable fine-tuned Sentence Transformer
+```
+
+Use `pretraining/final-checkpoint` to preserve or resume the RetroMAE objective. Start Sentence
+Transformers fine-tuning from `pretraining/exports/sentence-transformers`; that export intentionally
+omits the pretraining-only reconstruction decoder.
+
 ## Pairwise contrastive training
 
 [`contrastive_training.py`](contrastive_training.py) constructs a labeled pair dataset and the
@@ -48,22 +67,3 @@ uv run python examples/mnrl_training.py
 
 Change `USE_CACHE` in the example to select CMNRL. With caching, the Trainer batch remains the full
 in-batch negative pool and `cmnrl_mini_batch_size` controls only the encoder activation chunk size.
-
-The output layout is:
-
-```text
-outputs/programmatic-retromae/
-├── pretraining/
-│   ├── checkpoint-*/                 # resumable Trainer state
-│   ├── final-checkpoint/             # encoder plus RetroMAE auxiliary weights
-│   └── exports/
-│       ├── transformers/             # clean Hugging Face encoder
-│       └── sentence-transformers/    # clean encoder plus CLS pooling
-└── sentence-transformers-finetuning/
-    ├── checkpoints/                  # ST Trainer checkpoints
-    └── final/                        # reloadable fine-tuned Sentence Transformer
-```
-
-Use `pretraining/final-checkpoint` to preserve or resume the RetroMAE objective. Use
-`pretraining/exports/sentence-transformers` as the starting point for Sentence Transformers
-fine-tuning; its export intentionally omits the pretraining-only reconstruction decoder.

@@ -23,6 +23,16 @@ Two spans are sampled from each document and kept adjacent in the batch. Their f
 representations are positives; all other spans in the global distributed batch are negatives.
 Similarity is an unnormalized dot product with temperature 1.0, matching the reference objective.
 
+Input can take any of three forms:
+
+- a list of spans in `spans_column`
+- individual span rows grouped by `document_id_column`
+- full documents in `text_column`, which Pretense splits into non-overlapping maximum-length spans
+
+Every document must provide at least two spans. Gradient accumulation must be `1` because separate
+microbatches cannot reproduce a single global in-batch negative pool. Pretense also enables
+`dataloader_drop_last` automatically so distributed processes receive equal batch sizes.
+
 ## Contriever
 
 Two independently cropped and augmented views are sampled from every document. The query view is
@@ -136,12 +146,24 @@ objective = MultipleNegativesRankingLoss(scale=20.0, similarity="cosine")
 loss = objective(anchor_embeddings, positive_embeddings, hard_negative_embeddings)
 ```
 
-## Compatibility
+## Exported sentence representations
 
-The BERT and RoBERTa paths reproduce the paper-era model behavior. ModernBERT and DeBERTa-v3 use
-their native embeddings and MLM heads with family-neutral auxiliary Transformer layers. These are
-objective-faithful adaptations, not claims that those later architectures appeared in the papers.
-Token-level masking is used consistently across tokenizers; whole-word masking can be added in a
-later release without changing model interfaces. Contriever, pairwise contrastive training, MNRL,
-and CMNRL only require an MLM head because that is the common model interface used by Pretense;
-their objectives consume backbone hidden states and do not compute MLM loss.
+- RetroMAE, DupMAE, Condenser, and coCondenser use the first token (the CLS-equivalent).
+- Contriever, pairwise contrastive training, MNRL, and CMNRL use attention-mask-aware mean pooling.
+- Contriever exports include normalization when `normalize_embeddings` was enabled during
+  pretraining.
+
+## Architecture compatibility
+
+BERT, RoBERTa, ModernBERT, and DeBERTa-v3 (the Transformers `deberta-v2` model type) are certified.
+Other masked language models can be supported with `BackboneAdapter`; unpublished models can be
+passed directly through `create_pretraining_model`. See the [custom-model guide](custom-models.md).
+
+The BERT and RoBERTa implementations reproduce the paper-era architecture. ModernBERT and
+DeBERTa-v3 use their native embeddings and MLM heads with family-neutral auxiliary Transformer
+layers. These are objective-faithful adaptations; the later architectures did not appear in the
+original papers.
+
+Pretense uses token-level masking across tokenizers. Contriever, pairwise contrastive training,
+MNRL, and CMNRL do not compute MLM loss, although their models still use Pretense's common
+masked-language-model interface.
