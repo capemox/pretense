@@ -35,7 +35,9 @@ jobs:
           subject-path: dist/*
       - name: Publish to PyPI
         if: github.event_name == 'release'
-        run: uv publish
+        run: uv publish --trusted-publishing always
       - name: Publish to TestPyPI
         if: github.event_name == 'workflow_dispatch'
-        run: uv publish --publish-url https://test.pypi.org/legacy/
+        run: >-
+          uv publish --trusted-publishing always
+          --publish-url https://test.pypi.org/legacy/
