@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sized
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from transformers import PreTrainedTokenizerBase, Trainer, TrainerCallback, TrainingArguments
 from transformers.trainer import TRAINING_ARGS_NAME
 from transformers.trainer_utils import EvalPrediction
 
-from .config import DataConfig
-from .data import build_collator
+from .data import SimCSECollator, build_collator
 from .modeling import PretensePretrainingModel
 
 
@@ -70,11 +69,7 @@ class PretenseTrainer(Trainer):
         if isinstance(self.processing_class, PreTrainedTokenizerBase):
             tokenizer = self.processing_class
             if data_collator is None:
-                self.data_collator = build_collator(
-                    tokenizer,
-                    self.model.method_config,
-                    DataConfig(),
-                )
+                self.data_collator = build_collator(tokenizer, self.model.method_config)
             needs_mask_token = self.model.method_config.name in {
                 "retromae",
                 "dupmae",
@@ -83,6 +78,9 @@ class PretenseTrainer(Trainer):
             } or (
                 self.model.method_config.name == "contriever"
                 and self.model.method_config.augmentation == "mask"
+            ) or (
+                self.model.method_config.name == "simcse"
+                and self.model.method_config.simcse_mlm_weight > 0
             )
             if needs_mask_token and tokenizer.mask_token_id is None:
                 raise ValueError("This Pretense method requires a tokenizer with a mask token.")
@@ -98,6 +96,27 @@ class PretenseTrainer(Trainer):
                     "does not reproduce global in-batch negatives."
                 )
             self.args.dataloader_drop_last = True
+        if self.model.method_config.name == "simcse":
+            # Cross-device gathering requires equal local shapes. On one process, preserve a
+            # smaller final batch unless it would contain a lone anchor with no explicit negative.
+            has_explicit_negative = (
+                isinstance(self.data_collator, SimCSECollator)
+                and self.data_collator.hard_negative_column is not None
+            )
+            if self.args.world_size > 1:
+                self.args.dataloader_drop_last = True
+            elif not has_explicit_negative and self.train_dataset is not None:
+                try:
+                    dataset_size = len(cast(Sized, self.train_dataset))
+                except TypeError:
+                    dataset_size = None
+                batch_size = self.args.per_device_train_batch_size
+                if (
+                    dataset_size is not None
+                    and dataset_size > batch_size
+                    and dataset_size % batch_size == 1
+                ):
+                    self.args.dataloader_drop_last = True
         # MNRL, CMNRL, and Contriever compute a loss without a field named ``labels``. Generic
         # Trainer inference otherwise treats those batches as prediction-only and omits eval_loss.
         self.can_return_loss = True

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 import torch
 from transformers import AutoModel, BertConfig, BertForMaskedLM
 
@@ -12,6 +13,7 @@ from pretense.modeling import (
     ContrieverForPretraining,
     PretensePretrainingModel,
     RetroMAEForPretraining,
+    SimCSEForPretraining,
 )
 
 
@@ -206,3 +208,45 @@ def test_export_checkpoint_creates_only_sentence_transformer_directory(
     assert export == export_root / "sentence-transformers"
     assert (export / "0_Transformer" / "model.safetensors").is_file()
     assert not (export_root / "transformers").exists()
+
+
+@pytest.mark.parametrize("mode", ["unsupervised", "supervised"])
+def test_simcse_checkpoint_and_projection_export(mode: str, tmp_path: Path, tokenizer) -> None:
+    method = MethodConfig(name="simcse", simcse_mode=mode)
+    model = SimCSEForPretraining(
+        BertForMaskedLM(
+            BertConfig(
+                vocab_size=len(tokenizer),
+                hidden_size=16,
+                num_hidden_layers=1,
+                num_attention_heads=2,
+                intermediate_size=32,
+                max_position_embeddings=32,
+            )
+        ),
+        method,
+    )
+    checkpoint = tmp_path / "checkpoint"
+    model.save_pretrained(checkpoint)
+    tokenizer.save_pretrained(checkpoint)
+    loaded = PretensePretrainingModel.from_pretraining_checkpoint(checkpoint)
+    assert isinstance(loaded, SimCSEForPretraining)
+
+    export = export_sentence_transformer(loaded, tokenizer, tmp_path / "sentence-transformers")
+    modules = json.loads((export / "modules.json").read_text(encoding="utf-8"))
+    has_dense = any(module["type"].endswith(".Dense") for module in modules)
+    assert has_dense is method.simcse_uses_projection_at_inference
+
+    from sentence_transformers import SentenceTransformer
+
+    sentence_model = SentenceTransformer(str(export), device="cpu")
+    texts = ["the quick brown fox", "the lazy dog"]
+    encoded = tokenizer(texts, padding=True, return_tensors="pt")
+    loaded.eval()
+    with torch.no_grad():
+        hidden = loaded.adapter.backbone(loaded.encoder)(**encoded).last_hidden_state
+        expected = hidden[:, 0]
+        if method.simcse_uses_projection_at_inference:
+            expected = torch.tanh(loaded.projection(expected))
+    actual = sentence_model.encode(texts, convert_to_tensor=True)
+    assert torch.allclose(expected, actual, atol=1e-6)

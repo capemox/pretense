@@ -1,120 +1,14 @@
 from __future__ import annotations
 
-import logging
 import random
-from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import torch
-from datasets import Dataset, IterableDataset, load_dataset
 from torch import Tensor
 from transformers import PreTrainedTokenizerBase
 
-from .config import DataConfig, MethodConfig
-
-logger = logging.getLogger(__name__)
-
-
-def load_pretraining_dataset(config: DataConfig, method: str) -> Dataset | IterableDataset:
-    if config.dataset_name is None and config.data_files is None:
-        raise ValueError(
-            "Set data.dataset_name or data.data_files in the recipe configuration."
-        )
-    if config.dataset_name is not None:
-        dataset = load_dataset(
-            config.dataset_name,
-            config.dataset_config_name,
-            split=config.split,
-            streaming=config.streaming,
-        )
-    else:
-        assert config.data_files is not None
-        first = (
-            next(iter(config.data_files.values()))
-            if isinstance(config.data_files, dict)
-            else config.data_files
-        )
-        first_path = first[0] if isinstance(first, list) else first
-        extension = Path(first_path).suffix.lower().lstrip(".")
-        if extension in {"txt", "text"}:
-            loader = "text"
-        elif extension in {"json", "jsonl", "ndjson"}:
-            loader = "json"
-        else:
-            loader = extension
-        dataset = load_dataset(
-            loader,
-            data_files=config.data_files,
-            split=config.split,
-            streaming=config.streaming,
-        )
-
-    return prepare_pretraining_dataset(dataset, config, method)
-
-
-def prepare_pretraining_dataset(
-    dataset: Dataset | IterableDataset,
-    config: DataConfig,
-    method: str,
-) -> Dataset | IterableDataset:
-    """Validate and normalize a loaded or programmatically supplied dataset."""
-    if method == "contrastive":
-        _require_columns(
-            dataset,
-            {config.text_column, config.text_pair_column, config.label_column},
-        )
-        return dataset
-    if method in {"mnrl", "cmnrl"}:
-        _require_columns(
-            dataset,
-            {config.text_column, config.text_pair_column, *config.negative_columns},
-        )
-        return dataset
-    if method != "cocondenser":
-        _require_columns(dataset, {config.text_column})
-        return dataset
-
-    if config.spans_column:
-        _require_columns(dataset, {config.spans_column})
-        if isinstance(dataset, Dataset):
-            before = len(dataset)
-            dataset = dataset.filter(
-                lambda row: len(row[config.spans_column]) >= 2,
-                num_proc=config.preprocessing_num_workers,
-                desc="Filtering documents with fewer than two spans",
-            )
-            logger.info("Filtered %d invalid coCondenser documents.", before - len(dataset))
-            if len(dataset) == 0:
-                raise ValueError("No coCondenser documents contain at least two spans.")
-        return dataset
-
-    if config.document_id_column:
-        if isinstance(dataset, IterableDataset):
-            raise ValueError(
-                "Grouping spans by document ID is not supported for streaming datasets."
-            )
-        _require_columns(dataset, {config.document_id_column, config.text_column})
-        grouped: dict[Any, list[str]] = defaultdict(list)
-        for row in dataset:
-            grouped[row[config.document_id_column]].append(row[config.text_column])
-        spans = [value for value in grouped.values() if len(value) >= 2]
-        logger.info(
-            "Prepared %d valid coCondenser documents from %d IDs.", len(spans), len(grouped)
-        )
-        if not spans:
-            raise ValueError("No document ID has at least two spans.")
-        return Dataset.from_dict({"spans": spans})
-
-    _require_columns(dataset, {config.text_column})
-    return dataset
-
-
-def _require_columns(dataset: Dataset | IterableDataset, required: set[str]) -> None:
-    missing = required - set(dataset.column_names)
-    if missing:
-        raise ValueError(f"Dataset is missing required columns: {sorted(missing)}")
+from .config import MethodConfig, SimCSEMode
 
 
 def _mask_tokens(
@@ -312,6 +206,59 @@ class MNRLCollator(BaseCollator):
 
 
 @dataclass
+class SimCSECollator(BaseCollator):
+    mode: SimCSEMode = "unsupervised"
+    text_pair_column: str = "text_pair"
+    hard_negative_column: str | None = None
+    use_mlm: bool = False
+    mlm_probability: float = 0.15
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"unsupervised", "supervised"}:
+            raise ValueError(f"Unknown SimCSE mode: {self.mode!r}.")
+        if self.mode == "unsupervised" and self.hard_negative_column is not None:
+            raise ValueError("Unsupervised SimCSE does not accept a hard-negative column.")
+        if not 0 < self.mlm_probability < 1:
+            raise ValueError("mlm_probability must be between 0 and 1.")
+        if self.use_mlm and self.tokenizer.mask_token_id is None:
+            raise ValueError("SimCSE's MLM objective requires a tokenizer with a mask token.")
+
+    def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
+        if not examples:
+            raise ValueError("SimCSE cannot collate an empty batch.")
+        anchors = [str(example[self.text_column]) for example in examples]
+        columns = [anchors]
+        if self.mode == "unsupervised":
+            columns.append(anchors)
+        else:
+            columns.append([str(example[self.text_pair_column]) for example in examples])
+            if self.hard_negative_column is not None:
+                columns.append(
+                    [str(example[self.hard_negative_column]) for example in examples]
+                )
+        groups = len(columns)
+        batch_size = len(examples)
+        batch = self._tokenize([text for column in columns for text in column])
+        input_ids = batch["input_ids"]
+        attention_mask = batch["attention_mask"]
+        result = {
+            "input_ids": input_ids.reshape(groups, batch_size, -1),
+            "attention_mask": attention_mask.reshape(groups, batch_size, -1),
+        }
+        if self.use_mlm:
+            specials = batch["special_tokens_mask"] | ~attention_mask.bool()
+            mlm_input_ids, mlm_labels, _ = _mask_tokens(
+                input_ids,
+                specials,
+                self.tokenizer,
+                self.mlm_probability,
+            )
+            result["mlm_input_ids"] = mlm_input_ids.reshape(groups, batch_size, -1)
+            result["mlm_labels"] = mlm_labels.reshape(groups, batch_size, -1)
+        return result
+
+
+@dataclass
 class ContrieverCollator(BaseCollator):
     augmentation: str = "delete"
     augmentation_probability: float = 0.10
@@ -396,13 +343,27 @@ class ContrieverCollator(BaseCollator):
 def build_collator(
     tokenizer: PreTrainedTokenizerBase,
     method: MethodConfig,
-    data: DataConfig,
+    *,
+    max_seq_length: int = 512,
+    text_column: str = "text",
+    text_pair_column: str = "text_pair",
+    label_column: str = "label",
+    negative_columns: tuple[str, ...] = (),
+    spans_column: str | None = None,
 ) -> BaseCollator:
+    """Create the appropriate collator using ordinary Python arguments."""
+    if max_seq_length < 4:
+        raise ValueError("max_seq_length must be at least 4.")
+    if len(negative_columns) != len(set(negative_columns)):
+        raise ValueError("negative_columns cannot contain duplicates.")
+    overlap = {text_column, text_pair_column}.intersection(negative_columns)
+    if overlap:
+        raise ValueError(f"negative_columns must differ from text columns: {sorted(overlap)}")
     if method.name in {"retromae", "dupmae"}:
         return MAECollator(
             tokenizer=tokenizer,
-            max_seq_length=data.max_seq_length,
-            text_column=data.text_column,
+            max_seq_length=max_seq_length,
+            text_column=text_column,
             encoder_mlm_probability=method.encoder_mlm_probability,
             decoder_mlm_probability=method.decoder_mlm_probability,
             include_bow=method.name == "dupmae",
@@ -410,8 +371,8 @@ def build_collator(
     if method.name == "contriever":
         return ContrieverCollator(
             tokenizer=tokenizer,
-            max_seq_length=data.max_seq_length,
-            text_column=data.text_column,
+            max_seq_length=max_seq_length,
+            text_column=text_column,
             augmentation=method.augmentation,
             augmentation_probability=method.augmentation_probability,
             crop_ratio_min=method.crop_ratio_min,
@@ -420,24 +381,38 @@ def build_collator(
     if method.name == "contrastive":
         return ContrastiveCollator(
             tokenizer=tokenizer,
-            max_seq_length=data.max_seq_length,
-            text_column=data.text_column,
-            text_pair_column=data.text_pair_column,
-            label_column=data.label_column,
+            max_seq_length=max_seq_length,
+            text_column=text_column,
+            text_pair_column=text_pair_column,
+            label_column=label_column,
         )
     if method.name in {"mnrl", "cmnrl"}:
         return MNRLCollator(
             tokenizer=tokenizer,
-            max_seq_length=data.max_seq_length,
-            text_column=data.text_column,
-            text_pair_column=data.text_pair_column,
-            negative_columns=tuple(data.negative_columns),
+            max_seq_length=max_seq_length,
+            text_column=text_column,
+            text_pair_column=text_pair_column,
+            negative_columns=negative_columns,
+        )
+    if method.name == "simcse":
+        hard_negative_column = negative_columns[0] if negative_columns else None
+        if len(negative_columns) > 1:
+            raise ValueError("SimCSE supports at most one hard-negative column.")
+        return SimCSECollator(
+            tokenizer=tokenizer,
+            max_seq_length=max_seq_length,
+            text_column=text_column,
+            mode=method.simcse_mode,
+            text_pair_column=text_pair_column,
+            hard_negative_column=hard_negative_column,
+            use_mlm=method.simcse_mlm_weight > 0,
+            mlm_probability=method.mlm_probability,
         )
     return MLMCollator(
         tokenizer=tokenizer,
-        max_seq_length=data.max_seq_length,
-        text_column=data.text_column,
+        max_seq_length=max_seq_length,
+        text_column=text_column,
         mlm_probability=method.mlm_probability,
-        spans_column=data.spans_column,
+        spans_column=spans_column,
         paired=method.name == "cocondenser",
     )

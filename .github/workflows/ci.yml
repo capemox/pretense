@@ -31,7 +31,8 @@ jobs:
         run: >-
           uv run --refresh --with dist/*.whl --no-project python -c
           "from pretense import PretenseTrainer, PretenseTrainingArguments, MNRLCollator,
-          ContrastiveLoss, MultipleNegativesRankingLoss, CachedMultipleNegativesRankingLoss"
+          SimCSECollator, SimCSEForPretraining, ContrastiveLoss,
+          MultipleNegativesRankingLoss, CachedMultipleNegativesRankingLoss"
 
   dependency-floor:
     runs-on: ubuntu-latest

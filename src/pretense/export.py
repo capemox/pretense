@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
+from torch import nn
 from transformers import AutoTokenizer
 
 from .modeling import PretensePretrainingModel
@@ -19,6 +20,7 @@ except ImportError:  # Sentence Transformers 5.2-5.6
 Normalize = _st_modules.Normalize
 Pooling = _st_modules.Pooling
 Transformer = _st_modules.Transformer
+Dense = _st_modules.Dense
 
 
 def _export_transformers(
@@ -43,6 +45,10 @@ def _export_transformers(
             model.method_config.normalize_embeddings
             if model.method_config.name == "contriever"
             else False
+        ),
+        "projection": (
+            model.method_config.name == "simcse"
+            and model.method_config.simcse_uses_projection_at_inference
         ),
         "pretense_format": 1,
     }
@@ -77,17 +83,35 @@ def export_sentence_transformer(
             dimension = transformer.get_word_embedding_dimension()
         pooling = Pooling(dimension, pooling_mode=pooling_mode)
         modules = [transformer, pooling]
+        if metadata["projection"]:
+            projection = getattr(model, "projection", None)
+            if not isinstance(projection, nn.Linear):
+                raise TypeError("The SimCSE model does not expose its projection layer.")
+            modules.append(
+                Dense(
+                    dimension,
+                    dimension,
+                    activation_function=nn.Tanh(),
+                    init_weight=projection.weight.detach().cpu(),
+                    init_bias=projection.bias.detach().cpu(),
+                )
+            )
         if metadata["normalize_embeddings"]:
             modules.append(Normalize())
         sentence_model = SentenceTransformer(modules=modules)
         sentence_model.save_pretrained(str(output), safe_serialization=True)
         shutil.copy2(metadata_path, output / metadata_path.name)
     readme = output / "README.md"
+    projection_note = (
+        " followed by the trained SimCSE projection"
+        if metadata.get("projection", False)
+        else ""
+    )
     with readme.open("a", encoding="utf-8") as handle:
         handle.write(
             "\n## Pretraining\n\n"
             "This encoder was pretrained with Pretense. See `pretense_export.json` for the method "
-            f"and export metadata. Sentence embeddings use {pooling_mode} pooling"
+            f"and export metadata. Sentence embeddings use {pooling_mode} pooling{projection_note}"
             f"{' with' if metadata.get('normalize_embeddings', False) else ' without'} "
             "normalization. To load only the Hugging Face Transformer backbone, use the "
             "`0_Transformer/` subdirectory (or the `subfolder=\"0_Transformer\"` argument on "

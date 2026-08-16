@@ -13,6 +13,7 @@ from pretense import (
     ContrieverForPretraining,
     MethodConfig,
     MNRLForPretraining,
+    SimCSEForPretraining,
 )
 
 
@@ -102,6 +103,20 @@ def main() -> None:
         assert torch.isfinite(ranking_output.mnrl_loss)
         ranking_output.loss.backward()
         assert ranking_model.encoder.bert.embeddings.word_embeddings.weight.grad is not None
+
+    simcse = SimCSEForPretraining(tiny_encoder(), MethodConfig(name="simcse"))
+    distributed_simcse = DistributedDataParallel(simcse)
+    sentence_ids = torch.randint(5, 30, (2, 2, 8)) + rank % 2
+    sentence_ids[1] = sentence_ids[0]
+    simcse_output = distributed_simcse(
+        input_ids=sentence_ids,
+        attention_mask=torch.ones_like(sentence_ids),
+    )
+    assert simcse_output.contrastive_loss is not None
+    assert torch.isfinite(simcse_output.contrastive_loss)
+    simcse_output.loss.backward()
+    assert simcse.projection.weight.grad is not None
+    assert simcse.encoder.bert.embeddings.word_embeddings.weight.grad is not None
     dist.barrier()
     dist.destroy_process_group()
 

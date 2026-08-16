@@ -1,15 +1,15 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from .backbones import BackboneAdapter, register_backbone_adapter
-from .config import (
-    MethodConfig,
-)
+from .config import MethodConfig
 from .data import (
     ContrastiveCollator,
     ContrieverCollator,
     MAECollator,
     MLMCollator,
     MNRLCollator,
+    SimCSECollator,
+    build_collator,
 )
 from .export import export_checkpoint, export_sentence_transformer
 from .modeling import (
@@ -22,6 +22,7 @@ from .modeling import (
     MNRLForPretraining,
     PretensePretrainingModel,
     RetroMAEForPretraining,
+    SimCSEForPretraining,
     create_pretraining_model,
     load_pretraining_model,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "MAECollator",
     "MLMCollator",
     "MNRLCollator",
+    "SimCSECollator",
     "MethodConfig",
     "MNRLForPretraining",
     "MultipleNegativesRankingLoss",
@@ -62,6 +64,8 @@ __all__ = [
     "PretenseTrainer",
     "PretenseTrainingArguments",
     "RetroMAEForPretraining",
+    "SimCSEForPretraining",
+    "build_collator",
     "create_pretraining_model",
     "export_checkpoint",
     "export_sentence_transformer",

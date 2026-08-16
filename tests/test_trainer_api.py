@@ -14,6 +14,8 @@ from pretense import (
     MNRLCollator,
     PretenseTrainer,
     PretenseTrainingArguments,
+    SimCSECollator,
+    build_collator,
     create_pretraining_model,
 )
 
@@ -45,6 +47,8 @@ def test_collators_are_available_from_public_api() -> None:
             ContrastiveCollator,
             ContrieverCollator,
             MNRLCollator,
+            SimCSECollator,
+            build_collator,
         )
     )
 
@@ -63,6 +67,25 @@ def test_trainer_selects_default_collator_for_standard_columns(tmp_path: Path, t
         processing_class=tokenizer,
     )
     assert isinstance(trainer.data_collator, MAECollator)
+
+
+def test_trainer_selects_simcse_collator_from_method(tmp_path: Path, tokenizer) -> None:
+    model = create_pretraining_model(MethodConfig(name="simcse"), tiny_encoder(len(tokenizer)))
+    trainer = PretenseTrainer(
+        model=model,
+        args=PretenseTrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=2,
+            max_steps=1,
+            save_strategy="no",
+            report_to="none",
+        ),
+        train_dataset=Dataset.from_dict({"text": ["the fox", "the dog"]}),
+        processing_class=tokenizer,
+    )
+    assert isinstance(trainer.data_collator, SimCSECollator)
+    trainer.train()
+    assert trainer.state.global_step == 1
 
 
 def test_direct_trainer_sdk_trains_evaluates_logs_and_saves(
@@ -134,3 +157,53 @@ def test_direct_trainer_enforces_cocondenser_batch_invariants(tmp_path: Path) ->
         args=PretenseTrainingArguments(output_dir=str(tmp_path), report_to="none"),
     )
     assert trainer.args.dataloader_drop_last is True
+
+
+def test_trainer_drops_singleton_simcse_remainder(tmp_path: Path) -> None:
+    model = create_pretraining_model(MethodConfig(name="simcse"), tiny_encoder(32))
+    trainer = PretenseTrainer(
+        model=model,
+        args=PretenseTrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=2,
+            report_to="none",
+        ),
+        train_dataset=[{"text": "one"}, {"text": "two"}, {"text": "three"}],
+    )
+    assert trainer.args.dataloader_drop_last is True
+
+
+def test_trainer_keeps_small_valid_simcse_batch(tmp_path: Path) -> None:
+    model = create_pretraining_model(MethodConfig(name="simcse"), tiny_encoder(32))
+    trainer = PretenseTrainer(
+        model=model,
+        args=PretenseTrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=4,
+            report_to="none",
+        ),
+        train_dataset=[{"text": "one"}, {"text": "two"}],
+    )
+    assert trainer.args.dataloader_drop_last is False
+
+
+def test_trainer_keeps_supervised_simcse_singleton_with_hard_negative(
+    tmp_path: Path, tokenizer
+) -> None:
+    method = MethodConfig(name="simcse", simcse_mode="supervised")
+    model = create_pretraining_model(method, tiny_encoder(len(tokenizer)))
+    trainer = PretenseTrainer(
+        model=model,
+        args=PretenseTrainingArguments(
+            output_dir=str(tmp_path),
+            per_device_train_batch_size=4,
+            report_to="none",
+        ),
+        data_collator=SimCSECollator(
+            tokenizer,
+            mode="supervised",
+            hard_negative_column="negative",
+        ),
+        train_dataset=[{"text": "one", "text_pair": "same", "negative": "different"}],
+    )
+    assert trainer.args.dataloader_drop_last is False

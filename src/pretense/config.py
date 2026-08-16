@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
-from typing import Any, Literal
-
-import yaml
+import math
+from dataclasses import dataclass
+from typing import Literal
 
 MethodName = Literal[
     "retromae",
@@ -15,10 +13,12 @@ MethodName = Literal[
     "contrastive",
     "mnrl",
     "cmnrl",
+    "simcse",
 ]
 ContrieverAugmentation = Literal["none", "delete", "mask", "replace", "shuffle"]
 ContrastiveDistanceMetric = Literal["cosine", "euclidean", "manhattan"]
 MNRLSimilarity = Literal["cosine", "dot"]
+SimCSEMode = Literal["unsupervised", "supervised"]
 
 
 @dataclass
@@ -47,6 +47,11 @@ class MethodConfig:
     mnrl_similarity: MNRLSimilarity = "cosine"
     mnrl_gather_across_devices: bool = False
     cmnrl_mini_batch_size: int = 32
+    simcse_mode: SimCSEMode = "unsupervised"
+    simcse_temperature: float = 0.05
+    simcse_mlp_only_train: bool | None = None
+    simcse_hard_negative_weight: float = 0.0
+    simcse_mlm_weight: float = 0.0
 
     def __post_init__(self) -> None:
         supported = {
@@ -58,6 +63,7 @@ class MethodConfig:
             "contrastive",
             "mnrl",
             "cmnrl",
+            "simcse",
         }
         if self.name not in supported:
             raise ValueError(
@@ -98,176 +104,21 @@ class MethodConfig:
             raise ValueError(f"Unknown MNRL similarity: {self.mnrl_similarity!r}.")
         if self.cmnrl_mini_batch_size < 1:
             raise ValueError("cmnrl_mini_batch_size must be positive.")
+        if self.simcse_mode not in {"unsupervised", "supervised"}:
+            raise ValueError(f"Unknown SimCSE mode: {self.simcse_mode!r}.")
+        if self.simcse_temperature <= 0:
+            raise ValueError("simcse_temperature must be positive.")
+        if not isinstance(self.simcse_hard_negative_weight, (int, float)) or not math.isfinite(
+            self.simcse_hard_negative_weight
+        ):
+            raise ValueError("simcse_hard_negative_weight must be finite and numeric.")
+        if self.simcse_mlm_weight < 0:
+            raise ValueError("simcse_mlm_weight cannot be negative.")
 
-
-@dataclass
-class ModelConfig:
-    model_name_or_path: str | None = None
-    tokenizer_name_or_path: str | None = None
-    trust_remote_code: bool = False
-    model_kwargs: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.model_kwargs, dict):
-            raise ValueError("model.model_kwargs must be a mapping.")
-        if "trust_remote_code" in self.model_kwargs:
-            raise ValueError(
-                "Set model.trust_remote_code directly instead of putting it in model.model_kwargs."
-            )
-
-
-@dataclass
-class DataConfig:
-    dataset_name: str | None = None
-    dataset_config_name: str | None = None
-    data_files: str | list[str] | dict[str, str | list[str]] | None = None
-    split: str = "train"
-    text_column: str = "text"
-    text_pair_column: str = "text_pair"
-    label_column: str = "label"
-    negative_columns: list[str] = field(default_factory=list)
-    spans_column: str | None = None
-    document_id_column: str | None = None
-    max_seq_length: int = 512
-    streaming: bool = False
-    preprocessing_num_workers: int | None = None
-
-    def __post_init__(self) -> None:
-        if self.max_seq_length < 4:
-            raise ValueError("max_seq_length must be at least 4.")
-        if len(self.negative_columns) != len(set(self.negative_columns)):
-            raise ValueError("data.negative_columns cannot contain duplicates.")
-        reserved = {self.text_column, self.text_pair_column}
-        overlap = reserved.intersection(self.negative_columns)
-        if overlap:
-            raise ValueError(
-                f"data.negative_columns must differ from the text columns: {sorted(overlap)}"
-            )
-
-
-@dataclass
-class TrainingConfig:
-    output_dir: str = "outputs/pretense"
-    per_device_train_batch_size: int = 8
-    per_device_eval_batch_size: int = 8
-    learning_rate: float = 5e-5
-    weight_decay: float = 0.01
-    num_train_epochs: float = 1.0
-    max_steps: int = -1
-    warmup_ratio: float = 0.1
-    gradient_accumulation_steps: int = 1
-    max_grad_norm: float = 1.0
-    lr_scheduler_type: str = "linear"
-    gradient_checkpointing: bool = False
-    logging_strategy: str = "steps"
-    logging_steps: float = 10
-    logging_first_step: bool = False
-    log_level: str = "passive"
-    disable_tqdm: bool | None = None
-    run_name: str | None = None
-    save_steps: float = 500
-    save_total_limit: int | None = None
-    save_only_model: bool = False
-    eval_strategy: str = "no"
-    eval_steps: float | None = None
-    eval_on_start: bool = False
-    save_strategy: str = "steps"
-    load_best_model_at_end: bool = False
-    metric_for_best_model: str | None = None
-    greater_is_better: bool | None = None
-    seed: int = 42
-    bf16: bool = False
-    fp16: bool = False
-    dataloader_num_workers: int = 0
-    dataloader_drop_last: bool = False
-    report_to: str | list[str] = "none"
-    resume_from_checkpoint: str | bool | None = None
-
-    def __post_init__(self) -> None:
-        if self.per_device_train_batch_size < 1 or self.per_device_eval_batch_size < 1:
-            raise ValueError("Training and evaluation batch sizes must be positive.")
-        if self.gradient_accumulation_steps < 1:
-            raise ValueError("gradient_accumulation_steps must be positive.")
-        if not 0 <= self.warmup_ratio <= 1:
-            raise ValueError("warmup_ratio must be between 0 and 1.")
-        if self.logging_strategy == "steps" and self.logging_steps <= 0:
-            raise ValueError("logging_steps must be positive when logging_strategy='steps'.")
-        if self.save_strategy == "steps" and self.save_steps <= 0:
-            raise ValueError("save_steps must be positive when save_strategy='steps'.")
-        if self.eval_strategy == "steps" and self.eval_steps is not None and self.eval_steps <= 0:
-            raise ValueError("eval_steps must be positive when provided.")
-        if self.save_total_limit is not None and self.save_total_limit < 1:
-            raise ValueError("save_total_limit must be positive when provided.")
-        if self.bf16 and self.fp16:
-            raise ValueError("bf16 and fp16 cannot both be enabled.")
-        if self.save_only_model and self.resume_from_checkpoint:
-            raise ValueError("save_only_model checkpoints cannot be resumed.")
-
-
-@dataclass
-class ExportConfig:
-    enabled: bool = True
-    push_to_hub: bool = False
-    repo_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.push_to_hub and not self.repo_id:
-            raise ValueError("Set export.repo_id when push_to_hub is enabled.")
-        if self.push_to_hub and not self.enabled:
-            raise ValueError("Enable the model export before pushing it to the Hub.")
-
-
-@dataclass
-class PretenseConfig:
-    model: ModelConfig
-    method: MethodConfig
-    data: DataConfig
-    training: TrainingConfig = field(default_factory=TrainingConfig)
-    export: ExportConfig = field(default_factory=ExportConfig)
-
-    def validate(self) -> None:
-        """Revalidate the mutable configuration before starting a run."""
-        self.model.__post_init__()
-        self.method.__post_init__()
-        self.data.__post_init__()
-        self.training.__post_init__()
-        self.export.__post_init__()
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> PretenseConfig:
-        allowed = {"model", "method", "data", "training", "export"}
-        unknown = set(value) - allowed
-        if unknown:
-            raise ValueError(f"Unknown top-level configuration keys: {sorted(unknown)}")
-        required = {"model", "method", "data"}
-        missing = required - set(value)
-        if missing:
-            raise ValueError(f"Missing configuration sections: {sorted(missing)}")
-        return cls(
-            model=_strict_dataclass(ModelConfig, value["model"]),
-            method=_strict_dataclass(MethodConfig, value["method"]),
-            data=_strict_dataclass(DataConfig, value["data"]),
-            training=_strict_dataclass(TrainingConfig, value.get("training", {})),
-            export=_strict_dataclass(ExportConfig, value.get("export", {})),
-        )
-
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> PretenseConfig:
-        with Path(path).open(encoding="utf-8") as handle:
-            value = yaml.safe_load(handle)
-        if not isinstance(value, dict):
-            raise ValueError("The configuration root must be a mapping.")
-        return cls.from_dict(value)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-def _strict_dataclass(class_: type[Any], value: Any) -> Any:
-    if not isinstance(value, dict):
-        raise ValueError(f"{class_.__name__} must be configured with a mapping.")
-    fields = class_.__dataclass_fields__
-    unknown = set(value) - set(fields)
-    if unknown:
-        raise ValueError(f"Unknown {class_.__name__} keys: {sorted(unknown)}")
-    return class_(**value)
+    @property
+    def simcse_uses_projection_at_inference(self) -> bool:
+        """Whether the SimCSE projection MLP is part of downstream embeddings."""
+        mlp_only_train = self.simcse_mlp_only_train
+        if mlp_only_train is None:
+            mlp_only_train = self.simcse_mode == "unsupervised"
+        return not mlp_only_train

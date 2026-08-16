@@ -38,6 +38,20 @@ trainer.train()
 If `processing_class` is a tokenizer and `data_collator` is omitted, the trainer selects the
 method's collator using standard column names (`text`, `text_pair`, and `label`). Pass an explicit
 collator when using custom names, coCondenser span fields, or MNRL explicit-negative columns.
+The public `build_collator()` helper provides the same selection with explicit Python options:
+
+```python
+from pretense import build_collator
+
+collator = build_collator(
+    tokenizer,
+    model.method_config,
+    max_seq_length=256,
+    text_column="query",
+    text_pair_column="positive",
+    negative_columns=("hard_negative",),
+)
+```
 
 `logging_steps`, `save_steps`, and `eval_steps` accept either an integer number of update steps or a
 ratio below one. Normal Trainer logs go to the console and `trainer.state.log_history`. Pretense
@@ -76,12 +90,6 @@ API:
 
 ```python
 trainer.train(resume_from_checkpoint="outputs/retromae/checkpoint-500")
-```
-
-or on the command line:
-
-```bash
-pretense train recipes/retromae.yaml --resume-from-checkpoint outputs/retromae/checkpoint-500
 ```
 
 Passing `True` asks Trainer to find the latest checkpoint in the output directory. Setting
@@ -140,17 +148,7 @@ known. Caller-supplied datasets must contain the columns required by the selecte
 - Pairwise contrastive training uses `text_column`, `text_pair_column`, and `label_column`.
 - MNRL and CMNRL use `text_column` for anchors and `text_pair_column` for positives. Each entry in
   `negative_columns` adds an optional explicit-negative column.
-- coCondenser accepts the same `spans_column` and `document_id_column` formats for programmatic and
-  recipe-loaded datasets.
-
-## Recipes and the CLI
-
-YAML recipes remain available for standard command-line runs:
-
-```bash
-pretense train recipes/retromae.yaml
-```
-
-The CLI converts the recipe into the same model, collator, training arguments, and
-`PretenseTrainer` objects shown above. Its recipe-configuration objects are internal to the
-command-line path and are not requirements of the Python SDK.
+- Unsupervised SimCSE uses one text column. Supervised SimCSE uses a premise, entailment, and
+  optional contradiction hard-negative column.
+- coCondenser accepts full documents in `text_column` or a list of spans in `spans_column`. Group
+  separate span rows into one list per document before passing the dataset to the trainer.

@@ -1,5 +1,19 @@
 # Method notes
 
+Every objective follows the same programmatic setup. Choose a `MethodConfig`, load or construct the
+model, and let `build_collator()` select the matching collator:
+
+```python
+from pretense import MethodConfig, build_collator, load_pretraining_model
+
+method = MethodConfig(name="dupmae")
+model = load_pretraining_model(method, "google-bert/bert-base-uncased")
+collator = build_collator(tokenizer, method, max_seq_length=512)
+```
+
+Pass `model`, `collator`, and your dataset to `PretenseTrainer`. The sections below describe the
+method-specific settings and input columns.
+
 ## RetroMAE
 
 The encoder receives a moderately corrupted view. A shallow decoder reconstructs content tokens
@@ -23,10 +37,9 @@ Two spans are sampled from each document and kept adjacent in the batch. Their f
 representations are positives; all other spans in the global distributed batch are negatives.
 Similarity is an unnormalized dot product with temperature 1.0, matching the reference objective.
 
-Input can take any of three forms:
+Input can take either of two forms:
 
 - a list of spans in `spans_column`
-- individual span rows grouped by `document_id_column`
 - full documents in `text_column`, which Pretense splits into non-overlapping maximum-length spans
 
 Every document must provide at least two spans. Gradient accumulation must be `1` because separate
@@ -42,14 +55,63 @@ earlier batches. The queue and momentum encoder are included in resumable Preten
 omitted from clean exports.
 
 The `delete`, `mask`, `replace`, and `shuffle` token augmentations from the reference implementation
-are supported, along with `none`. The included recipe uses the published English setup: deletion at
-probability 0.1, crop ratios from 0.1 to 0.5, momentum 0.9995, queue size 131,072, and temperature
-0.05. These are expensive paper-scale settings; smaller queues and fewer steps are useful for
-development but change the objective's negative distribution.
+are supported, along with `none`. The published English setup uses deletion at probability 0.1,
+crop ratios from 0.1 to 0.5, momentum 0.9995, queue size 131,072, and temperature 0.05. These are
+expensive paper-scale settings; smaller queues and fewer steps are useful for development but
+change the objective's negative distribution.
 
 Contriever uses attention-mask-aware mean pooling. Its Sentence Transformers export preserves that
 pooling choice. Optional embedding normalization is applied consistently during training and
 included as a `Normalize` export module.
+
+## SimCSE
+
+Unsupervised SimCSE tokenizes each sentence once, duplicates the resulting features, and passes the
+two identical views through the encoder together. Independent dropout masks are the only source of
+augmentation. Other positives in the batch form the negative pool, so a single-example global
+batch is invalid unless a supervised hard negative is present.
+
+```python
+from pretense import MethodConfig, SimCSECollator
+
+method = MethodConfig(name="simcse", simcse_mode="unsupervised")
+collator = SimCSECollator(tokenizer, text_column="text", max_seq_length=32)
+```
+
+Supervised SimCSE uses an entailment as each premise's positive. A contradiction can be supplied as
+the corresponding hard negative; `simcse_hard_negative_weight` is added directly to that paired
+negative's logit, matching the reference implementation.
+
+```python
+method = MethodConfig(
+    name="simcse",
+    simcse_mode="supervised",
+    simcse_temperature=0.05,
+    simcse_hard_negative_weight=0.0,
+)
+collator = SimCSECollator(
+    tokenizer,
+    mode="supervised",
+    text_column="premise",
+    text_pair_column="entailment",
+    hard_negative_column="contradiction",
+)
+```
+
+Both modes use the first-token representation followed by a learned linear-tanh projection while
+optimizing cosine-similarity InfoNCE. By default, unsupervised SimCSE uses that MLP only during
+training and omits it from downstream exports, while supervised SimCSE retains it as a Sentence
+Transformers `Dense` module. Override this behavior with `simcse_mlp_only_train`.
+Loading only the export's `0_Transformer/` subdirectory intentionally excludes that projection;
+load the Sentence Transformers export root when the supervised projection is required.
+
+Set `simcse_mlm_weight` above zero and enable `use_mlm` on `SimCSECollator` to add the optional MLM
+objective. `mlm_probability` controls its masking rate. Pretense gathers positive and hard-negative
+embeddings across distributed workers during training and enables `dataloader_drop_last` for
+distributed runs so every worker has an equal batch shape. On one process, it drops only a final
+singleton batch that has no explicit hard negative; smaller valid batches are retained. Avoid
+duplicate sentences within a batch unless they are intended positives, since they otherwise become
+false negatives.
 
 ## Contrastive
 
@@ -67,15 +129,20 @@ Sentence Transformers export.
 
 Configure the input column names independently:
 
-```yaml
-method:
-  name: contrastive
-  contrastive_distance_metric: cosine
-  contrastive_margin: 0.5
-data:
-  text_column: sentence1
-  text_pair_column: sentence2
-  label_column: label
+```python
+from pretense import ContrastiveCollator, MethodConfig
+
+method = MethodConfig(
+    name="contrastive",
+    contrastive_distance_metric="cosine",
+    contrastive_margin=0.5,
+)
+collator = ContrastiveCollator(
+    tokenizer,
+    text_column="sentence1",
+    text_pair_column="sentence2",
+    label_column="label",
+)
 ```
 
 This method is useful for labeled or weakly labeled pairs. For unlabeled documents, Contriever is
@@ -99,19 +166,24 @@ acts as a negative. Any configured explicit negative columns are appended to tha
 The default is cosine similarity scaled by `20.0`; unnormalized dot-product similarity is also
 available.
 
-```yaml
-method:
-  name: mnrl
-  mnrl_scale: 20.0
-  mnrl_similarity: cosine
-  mnrl_gather_across_devices: false
-data:
-  text_column: query
-  text_pair_column: positive
-  negative_columns: [hard_negative]
+```python
+from pretense import MNRLCollator, MethodConfig
+
+method = MethodConfig(
+    name="mnrl",
+    mnrl_scale=20.0,
+    mnrl_similarity="cosine",
+    mnrl_gather_across_devices=False,
+)
+collator = MNRLCollator(
+    tokenizer,
+    text_column="query",
+    text_pair_column="positive",
+    negative_columns=("hard_negative",),
+)
 ```
 
-Set `mnrl_gather_across_devices: true` under distributed training to include candidate columns from
+Set `mnrl_gather_across_devices=True` under distributed training to include candidate columns from
 every process. All processes must then use the same local batch size; dropping the last incomplete
 batch is recommended. Cross-device gathering increases communication and the effective number of
 negatives.
@@ -119,13 +191,14 @@ negatives.
 Cached MNRL (CMNRL) has the same scores and gradients but uses GradCache to encode each large
 Trainer batch in smaller chunks:
 
-```yaml
-method:
-  name: cmnrl
-  mnrl_scale: 20.0
-  cmnrl_mini_batch_size: 32
-training:
-  per_device_train_batch_size: 256
+```python
+from pretense import MethodConfig, PretenseTrainingArguments
+
+method = MethodConfig(name="cmnrl", mnrl_scale=20.0, cmnrl_mini_batch_size=32)
+args = PretenseTrainingArguments(
+    output_dir="outputs/cmnrl",
+    per_device_train_batch_size=256,
+)
 ```
 
 Here `256` determines the local in-batch candidate pool, while `32` bounds encoder activation
@@ -150,6 +223,7 @@ loss = objective(anchor_embeddings, positive_embeddings, hard_negative_embedding
 
 - RetroMAE, DupMAE, Condenser, and coCondenser use the first token (the CLS-equivalent).
 - Contriever, pairwise contrastive training, MNRL, and CMNRL use attention-mask-aware mean pooling.
+- SimCSE uses the first token, optionally followed by its trained projection MLP.
 - Contriever exports include normalization when `normalize_embeddings` was enabled during
   pretraining.
 
@@ -166,4 +240,5 @@ original papers.
 
 Pretense uses token-level masking across tokenizers. Contriever, pairwise contrastive training,
 MNRL, and CMNRL do not compute MLM loss, although their models still use Pretense's common
-masked-language-model interface.
+masked-language-model interface. SimCSE computes MLM only when its optional auxiliary weight is
+enabled.

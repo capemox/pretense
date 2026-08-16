@@ -1,7 +1,7 @@
 # Programmatic examples
 
-Recipes under `recipes/` are intended for the `pretense train` command. These scripts use the
-composable `PretenseTrainer` Python API instead.
+These scripts use the composable `PretenseTrainer` Python API and are intended as starting points
+for custom training programs.
 
 ## RetroMAE followed by Sentence Transformers fine-tuning
 
@@ -18,7 +18,7 @@ complete model lifecycle:
 Run it from the repository root:
 
 ```bash
-uv run python examples/retromae_then_sentence_transformers.py
+uv run --extra examples python examples/retromae_then_sentence_transformers.py
 ```
 
 The example limits each phase to a manageable subset. These values demonstrate the API but are not
@@ -47,10 +47,10 @@ omits the pretraining-only reconstruction decoder.
 
 [`contrastive_training.py`](contrastive_training.py) constructs a labeled pair dataset and the
 complete configuration directly in Python. It demonstrates the ST-compatible contrastive margin
-objective without requiring a YAML recipe:
+objective through the public SDK:
 
 ```bash
-uv run python examples/contrastive_training.py
+uv run --extra examples python examples/contrastive_training.py
 ```
 
 Replace the inline demonstration data with a `datasets.Dataset` containing two configured text
@@ -62,8 +62,19 @@ columns and a binary label column for a real run.
 entirely through the Python SDK:
 
 ```bash
-uv run python examples/mnrl_training.py
+uv run --extra examples python examples/mnrl_training.py
 ```
 
 Change `USE_CACHE` in the example to select CMNRL. With caching, the Trainer batch remains the full
 in-batch negative pool and `cmnrl_mini_batch_size` controls only the encoder activation chunk size.
+
+## SimCSE
+
+[`simcse_training.py`](simcse_training.py) demonstrates dropout-only unsupervised SimCSE and
+supervised NLI training with contradiction hard negatives:
+
+```bash
+uv run --extra examples python examples/simcse_training.py
+```
+
+Set `SUPERVISED` to select the data format and `USE_MLM` to enable the optional auxiliary MLM loss.

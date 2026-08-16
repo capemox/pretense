@@ -1,21 +1,7 @@
 # FlashAttention
 
-In recipes, Pretense forwards `model.model_kwargs` to Transformers'
-`AutoModelForMaskedLM.from_pretrained`. Select FlashAttention-2 and a supported half-precision
-dtype like this:
-
-```yaml
-model:
-  model_name_or_path: google-bert/bert-base-uncased
-  model_kwargs:
-    attn_implementation: flash_attention_2
-    dtype: bfloat16
-training:
-  bf16: true
-```
-
-With the Python SDK, pass the attention backend while loading the model and use normal trainer
-arguments for mixed precision:
+Pass the attention backend while loading the model and use normal Trainer arguments for mixed
+precision:
 
 ```python
 from pretense import MethodConfig, PretenseTrainer, PretenseTrainingArguments
@@ -90,8 +76,8 @@ encoder = AutoModelForMaskedLM.from_pretrained(
 model = create_pretraining_model("retromae", encoder)
 ```
 
-`model.model_kwargs` only apply when Pretense loads `model_name_or_path`; they cannot safely change
-the attention implementation of an already constructed custom model.
+Attention options apply while loading or constructing the underlying model; they cannot safely
+change the attention implementation of an already constructed custom model.
 
 ## Scope and compatibility
 
@@ -105,3 +91,4 @@ decoder and Condenser and coCondenser's auxiliary head remain standard PyTorch m
 Sentence Transformers inference path, Pretense does not flatten or unpad collator batches; the
 selected Transformers backend receives the normal padded attention mask during training.
 Contriever applies the selected backend to both its online encoder and the copied momentum encoder.
+SimCSE applies it to both dropout views and to the optional auxiliary MLM pass.

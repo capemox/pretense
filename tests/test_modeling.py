@@ -176,6 +176,113 @@ def test_contrastive_loss_matches_sentence_transformers(tokenizer) -> None:
     assert torch.allclose(output.loss, expected)
 
 
+def test_unsupervised_simcse_trains_projection_and_backbone() -> None:
+    model = MODEL_CLASSES["simcse"](tiny_encoder(), MethodConfig(name="simcse"))
+    model.train()
+    ids = torch.randint(5, 30, (2, 4, 6))
+    ids[1] = ids[0]
+    with torch.no_grad():
+        _, views = model._projected_cls(ids.flatten(0, 1), torch.ones_like(ids).flatten(0, 1))
+        views = views.reshape(2, 4, -1)
+    assert not torch.equal(views[0], views[1])
+    output = model(input_ids=ids, attention_mask=torch.ones_like(ids))
+    assert torch.isfinite(output.loss)
+    assert output.contrastive_loss is not None
+    output.loss.backward()
+    assert model.projection.weight.grad is not None
+    assert any(
+        parameter.grad is not None
+        for parameter in model.adapter.backbone(model.encoder).parameters()
+    )
+    assert model.encoder.cls.predictions.transform.dense.weight.grad is None
+
+
+def test_supervised_simcse_hard_negative_weight_changes_loss() -> None:
+    baseline = MODEL_CLASSES["simcse"](
+        tiny_encoder(),
+        MethodConfig(name="simcse", simcse_mode="supervised"),
+    ).eval()
+    weighted = MODEL_CLASSES["simcse"](
+        tiny_encoder(),
+        MethodConfig(
+            name="simcse",
+            simcse_mode="supervised",
+            simcse_hard_negative_weight=2.0,
+        ),
+    ).eval()
+    weighted.load_state_dict(baseline.state_dict())
+    ids = torch.randint(5, 30, (3, 3, 6))
+    ids[2] = ids[1]
+    mask = torch.ones_like(ids)
+    baseline_loss = baseline(input_ids=ids, attention_mask=mask).loss
+    weighted_loss = weighted(input_ids=ids, attention_mask=mask).loss
+    assert baseline_loss is not None and weighted_loss is not None
+    assert weighted_loss > baseline_loss
+
+
+def test_supervised_simcse_matches_reference_logits() -> None:
+    config = MethodConfig(
+        name="simcse",
+        simcse_mode="supervised",
+        simcse_temperature=0.07,
+        simcse_hard_negative_weight=0.4,
+    )
+    model = MODEL_CLASSES["simcse"](tiny_encoder(), config).eval()
+    ids = torch.randint(5, 30, (3, 3, 6))
+    mask = torch.ones_like(ids)
+    output = model(input_ids=ids, attention_mask=mask)
+    with torch.no_grad():
+        _, projected = model._projected_cls(ids.flatten(0, 1), mask.flatten(0, 1))
+        projected = torch.nn.functional.normalize(projected.reshape(3, 3, -1), dim=-1)
+        positive_scores = projected[0] @ projected[1].T / config.simcse_temperature
+        negative_scores = projected[0] @ projected[2].T / config.simcse_temperature
+        negative_scores.diagonal().add_(config.simcse_hard_negative_weight)
+        logits = torch.cat([positive_scores, negative_scores], dim=1)
+        expected = torch.nn.functional.cross_entropy(logits, torch.arange(3))
+    assert torch.allclose(output.loss, expected)
+
+
+def test_simcse_optional_mlm_trains_language_model_head() -> None:
+    config = MethodConfig(name="simcse", simcse_mlm_weight=0.1)
+    model = MODEL_CLASSES["simcse"](tiny_encoder(), config)
+    ids = torch.randint(5, 30, (2, 2, 6))
+    ids[1] = ids[0]
+    mlm_ids = ids.clone()
+    mlm_labels = torch.full_like(ids, -100)
+    mlm_labels[:, :, 2] = ids[:, :, 2]
+    mlm_ids[:, :, 2] = 4
+    output = model(
+        input_ids=ids,
+        attention_mask=torch.ones_like(ids),
+        mlm_input_ids=mlm_ids,
+        mlm_labels=mlm_labels,
+    )
+    assert output.encoder_mlm_loss is not None
+    assert torch.isfinite(output.loss)
+    output.loss.backward()
+    assert model.encoder.cls.predictions.transform.dense.weight.grad is not None
+
+
+def test_simcse_rejects_degenerate_or_mismatched_batches() -> None:
+    unsupervised = MODEL_CLASSES["simcse"](tiny_encoder(), MethodConfig(name="simcse"))
+    one = torch.randint(5, 30, (2, 1, 6))
+    with pytest.raises(ValueError, match="at least one in-batch"):
+        unsupervised(input_ids=one, attention_mask=torch.ones_like(one))
+    wrong_columns = torch.randint(5, 30, (3, 2, 6))
+    with pytest.raises(ValueError, match="expected 2"):
+        unsupervised(
+            input_ids=wrong_columns,
+            attention_mask=torch.ones_like(wrong_columns),
+        )
+    with pytest.raises(ValueError, match="simcse_mlm_weight"):
+        unsupervised(
+            input_ids=torch.randint(5, 30, (2, 2, 6)),
+            attention_mask=torch.ones(2, 2, 6, dtype=torch.long),
+            mlm_input_ids=torch.randint(5, 30, (2, 2, 6)),
+            mlm_labels=torch.full((2, 2, 6), -100),
+        )
+
+
 @pytest.mark.parametrize("method", ["mnrl", "cmnrl"])
 @pytest.mark.parametrize("explicit_negative", [False, True])
 def test_mnrl_family_trains_backbone(method: str, explicit_negative: bool) -> None:
@@ -202,7 +309,7 @@ def test_mnrl_family_trains_backbone(method: str, explicit_negative: bool) -> No
     assert model.encoder.cls.predictions.transform.dense.weight.grad is None
 
 
-@pytest.mark.parametrize("method", ["contrastive", "mnrl", "cmnrl"])
+@pytest.mark.parametrize("method", ["contrastive", "mnrl", "cmnrl", "simcse"])
 @pytest.mark.parametrize(
     "encoder",
     [
@@ -243,6 +350,12 @@ def test_sentence_objectives_support_certified_families(method: str, encoder) ->
             other_input_ids=torch.randint(5, 30, (2, 6)),
             other_attention_mask=torch.ones_like(anchor_ids),
             labels=torch.tensor([1.0, 0.0]),
+        )
+    elif method == "simcse":
+        simcse_ids = torch.stack([anchor_ids, anchor_ids])
+        output = model(
+            input_ids=simcse_ids,
+            attention_mask=torch.ones_like(simcse_ids),
         )
     else:
         candidate_ids = torch.randint(5, 30, (1, 2, 6))

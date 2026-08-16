@@ -519,6 +519,129 @@ class ContrastiveForPretraining(PretensePretrainingModel):
         )
 
 
+class SimCSEForPretraining(PretensePretrainingModel):
+    """Supervised or dropout-only unsupervised SimCSE pretraining."""
+
+    method_name = "simcse"
+
+    def __init__(
+        self,
+        encoder: PreTrainedModel,
+        method_config: MethodConfig,
+        adapter: BackboneAdapter | None = None,
+    ) -> None:
+        super().__init__(encoder, method_config, adapter)
+        hidden_size = int(encoder.config.hidden_size)
+        self.projection = nn.Linear(hidden_size, hidden_size)
+        initializer_range = float(getattr(encoder.config, "initializer_range", 0.02))
+        nn.init.normal_(self.projection.weight, mean=0.0, std=initializer_range)
+        nn.init.zeros_(self.projection.bias)
+        if method_config.simcse_mlm_weight == 0:
+            self.encoder.requires_grad_(False)
+            self.adapter.backbone(self.encoder).requires_grad_(True)
+
+    def _projected_cls(self, input_ids: Tensor, attention_mask: Tensor) -> tuple[Tensor, Tensor]:
+        output = self.adapter.backbone(self.encoder)(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+        if isinstance(output, Tensor):
+            hidden = output
+        elif hasattr(output, "last_hidden_state"):
+            hidden = output.last_hidden_state
+        else:
+            hidden = output[0]
+        raw = self.adapter.sentence_embedding(hidden)
+        return raw, torch.tanh(self.projection(raw))
+
+    def forward(
+        self,
+        input_ids: Tensor,
+        attention_mask: Tensor,
+        mlm_input_ids: Tensor | None = None,
+        mlm_labels: Tensor | None = None,
+        **kwargs: Tensor,
+    ) -> PretensePretrainingOutput:
+        del kwargs
+        if input_ids.ndim != 3 or attention_mask.shape != input_ids.shape:
+            raise ValueError("SimCSE inputs must have shape [columns, batch, sequence].")
+        columns, batch_size, sequence_length = input_ids.shape
+        expected_columns = (
+            (2,) if self.method_config.simcse_mode == "unsupervised" else (2, 3)
+        )
+        if columns not in expected_columns:
+            raise ValueError(
+                f"{self.method_config.simcse_mode.capitalize()} SimCSE received {columns} "
+                "sentence columns; expected "
+                f"{' or '.join(str(value) for value in expected_columns)}."
+            )
+
+        flat_ids = input_ids.reshape(columns * batch_size, sequence_length)
+        flat_mask = attention_mask.reshape(columns * batch_size, sequence_length)
+        raw, projected = self._projected_cls(flat_ids, flat_mask)
+        raw = raw.reshape(columns, batch_size, -1)
+        projected = projected.reshape(columns, batch_size, -1)
+        anchors = projected[0]
+        positives = projected[1]
+        hard_negatives = projected[2] if columns == 3 else None
+
+        offset = 0
+        if dist.is_available() and dist.is_initialized() and self.training:
+            positives = _gather_with_grad(positives)
+            if hard_negatives is not None:
+                hard_negatives = _gather_with_grad(hard_negatives)
+            offset = dist.get_rank() * batch_size
+        if positives.shape[0] == 1 and hard_negatives is None:
+            raise ValueError("SimCSE requires at least one in-batch or explicit negative.")
+
+        anchor_normalized = F.normalize(anchors, dim=-1)
+        positive_normalized = F.normalize(positives, dim=-1)
+        scores = anchor_normalized @ positive_normalized.T
+        scores /= self.method_config.simcse_temperature
+        if hard_negatives is not None:
+            negative_normalized = F.normalize(hard_negatives, dim=-1)
+            negative_scores = anchor_normalized @ negative_normalized.T
+            negative_scores /= self.method_config.simcse_temperature
+            scores = torch.cat([scores, negative_scores], dim=1)
+            adjustment = torch.zeros_like(scores)
+            rows = torch.arange(batch_size, device=scores.device)
+            adjustment[rows, positives.shape[0] + offset + rows] = (
+                self.method_config.simcse_hard_negative_weight
+            )
+            scores = scores + adjustment
+        targets = torch.arange(offset, offset + batch_size, device=scores.device)
+        contrastive_loss = F.cross_entropy(scores, targets)
+
+        mlm_loss = None
+        loss = contrastive_loss
+        if self.method_config.simcse_mlm_weight > 0:
+            if mlm_input_ids is None or mlm_labels is None:
+                raise ValueError("SimCSE MLM training requires mlm_input_ids and mlm_labels.")
+            if mlm_input_ids.shape != input_ids.shape or mlm_labels.shape != input_ids.shape:
+                raise ValueError("SimCSE MLM tensors must have the same shape as input_ids.")
+            mlm_output = self._encode(
+                mlm_input_ids.reshape(columns * batch_size, sequence_length),
+                flat_mask,
+                mlm_labels.reshape(columns * batch_size, sequence_length),
+            )
+            mlm_loss = mlm_output.loss
+            loss = loss + self.method_config.simcse_mlm_weight * mlm_loss
+        elif mlm_input_ids is not None or mlm_labels is not None:
+            raise ValueError("Set simcse_mlm_weight above zero before supplying MLM tensors.")
+
+        sentence = (
+            projected[0]
+            if self.method_config.simcse_uses_projection_at_inference
+            else raw[0]
+        )
+        return PretensePretrainingOutput(
+            loss=loss,
+            sentence_embedding=sentence,
+            encoder_mlm_loss=mlm_loss,
+            contrastive_loss=contrastive_loss,
+        )
+
+
 class _MNRLForPretraining(PretensePretrainingModel):
     def __init__(
         self,
@@ -649,6 +772,7 @@ MODEL_CLASSES: dict[str, type[PretensePretrainingModel]] = {
     "contrastive": ContrastiveForPretraining,
     "mnrl": MNRLForPretraining,
     "cmnrl": CachedMNRLForPretraining,
+    "simcse": SimCSEForPretraining,
 }
 
 
