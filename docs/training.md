@@ -3,6 +3,10 @@
 `PretenseTrainer` subclasses Hugging Face `Trainer`. Use `PretenseTrainingArguments`, which extends
 `transformers.TrainingArguments` with defaults suitable for Pretense's text collators.
 
+Hugging Face `datasets.Dataset` objects require the optional dependency installed by
+`uv add "pretense[examples]"`. Plain lists and ordinary PyTorch-style datasets work with the core
+installation.
+
 ```python
 from pretense import PretenseTrainer, PretenseTrainingArguments
 
