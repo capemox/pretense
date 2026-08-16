@@ -3,7 +3,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import torch
 from datasets import Dataset
+from packaging.version import Version
 from transformers import BertConfig, BertForMaskedLM, TrainerCallback
 from transformers.trainer import TRAINING_ARGS_NAME
 
@@ -92,6 +94,9 @@ def test_programmatic_checkpoint_logging_and_resume(tmp_path: Path, tokenizer) -
     assert "encoder_mlm_loss" in training_record
     assert "decoder_mlm_loss" in training_record
     assert callback.count >= 1
+
+    if Version(torch.__version__.split("+")[0]) < Version("2.6"):
+        pytest.skip("Transformers requires Torch 2.6+ to restore optimizer checkpoint state.")
 
     resumed = PretenseTrainer(
         model=tiny_model(len(tokenizer)),

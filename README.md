@@ -27,6 +27,11 @@ uv add pretense
 Python 3.10 or newer is required. CUDA-enabled PyTorch should be selected using the appropriate
 uv/PyTorch index for the target system.
 
+Pretense supports PyTorch 2.2 and newer without choosing or replacing a particular CUDA build.
+Restoring a complete Trainer checkpoint, including optimizer and scheduler state, requires PyTorch
+2.6 or newer because Transformers blocks `torch.load` checkpoint restoration on earlier releases.
+Weights-only Pretense checkpoints use safetensors and remain loadable on every supported version.
+
 For development from a source checkout, use `uv sync --extra dev` instead.
 Install the optional Hugging Face Datasets dependency with `uv add "pretense[examples]"` when using
 the bundled examples.

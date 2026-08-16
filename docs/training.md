@@ -96,6 +96,12 @@ Passing `True` asks Trainer to find the latest checkpoint in the output director
 `save_only_model=True` saves space but intentionally omits the optimizer and scheduler state needed
 to resume.
 
+Transformers requires PyTorch 2.6 or newer when restoring optimizer and scheduler files because
+earlier `torch.load` releases are affected by a security vulnerability. On PyTorch 2.2 through 2.5,
+Pretense training, evaluation, safetensors model checkpoints, and downstream exports remain
+available, but use `save_only_model=True` or begin a new Trainer run from
+`PretensePretrainingModel.from_pretraining_checkpoint()` instead of resuming Trainer state.
+
 Call `trainer.save_model("path")` for a portable, weights-only Pretense checkpoint. Use
 `export_sentence_transformer(trainer.model, tokenizer, "path")` for the clean downstream export:
 

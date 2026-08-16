@@ -307,8 +307,10 @@ def _gather_with_grad(value: Tensor) -> Tensor:
 
         gather = _functional_collectives.all_gather_single_autograd
     except (ImportError, AttributeError):  # pragma: no cover - older supported PyTorch
+        from torch.distributed.nn.functional import all_gather
+
         return torch.cat(
-            list(torch.distributed.nn.all_gather(value)),  # type: ignore[attr-defined]
+            list(all_gather(value)),
             dim=0,
         )
     group = dist.group.WORLD

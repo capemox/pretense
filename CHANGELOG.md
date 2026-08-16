@@ -30,3 +30,5 @@ All notable changes follow Keep a Changelog and Semantic Versioning.
   programmatic training, component logging, checkpoints, and mean-pooled exports.
 - Add supervised and dropout-only unsupervised SimCSE with cross-device negatives, optional
   contradiction weighting and MLM, training-only projection support, clean exports, and an example.
+- Lower the PyTorch requirement from 2.6 to 2.2 while retaining full objective and distributed
+  training support; full Trainer-state resume remains conditional on PyTorch 2.6 or newer.

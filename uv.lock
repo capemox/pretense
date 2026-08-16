@@ -2310,7 +2310,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "safetensors", specifier = ">=0.4" },
     { name = "sentence-transformers", specifier = ">=5.2,<7" },
-    { name = "torch", specifier = ">=2.6" },
+    { name = "torch", specifier = ">=2.2" },
     { name = "transformers", specifier = ">=5,<6" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=6" },
 ]
