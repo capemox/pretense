@@ -1,4 +1,4 @@
-from importlib.metadata import PackageNotFoundError, version
+import importlib.metadata as _metadata
 
 from .backbones import BackboneAdapter, register_backbone_adapter
 from .config import MethodConfig
@@ -36,8 +36,8 @@ from .trainer import PretenseTrainer
 from .training_args import PretenseTrainingArguments
 
 try:
-    __version__ = version("pretense")
-except PackageNotFoundError:
+    __version__ = _metadata.version("pretense")
+except _metadata.PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
 __all__ = [
