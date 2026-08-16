@@ -42,6 +42,29 @@ def test_cocondenser_collator_keeps_adjacent_pairs(tokenizer) -> None:
     assert (batch["labels"] != -100).any(dim=1).all()
 
 
+def test_cocondenser_collator_accepts_token_id_spans(tokenizer) -> None:
+    collator = MLMCollator(tokenizer, max_seq_length=12, spans_column="spans", paired=True)
+    spans = [
+        tokenizer("the quick fox", add_special_tokens=False)["input_ids"],
+        tokenizer("the lazy dog", add_special_tokens=False)["input_ids"],
+    ]
+
+    batch = collator([{"spans": spans}])
+
+    assert batch["input_ids"].shape[0] == 2
+    assert (batch["input_ids"][:, 0] == tokenizer.cls_token_id).all()
+    assert (batch["labels"] != -100).any(dim=1).all()
+
+
+def test_cocondenser_collator_accepts_long_automatically_chunked_documents(tokenizer) -> None:
+    collator = MLMCollator(tokenizer, max_seq_length=12, paired=True)
+
+    batch = collator([{"text": " ".join(["the"] * 20)}])
+
+    assert batch["input_ids"].shape == (2, 12)
+    assert (batch["input_ids"][:, 0] == tokenizer.cls_token_id).all()
+
+
 def test_factory_selects_dupmae_bow(tokenizer) -> None:
     collator = build_collator(tokenizer, MethodConfig(name="dupmae"))
     assert isinstance(collator, MAECollator)
