@@ -105,11 +105,15 @@ class MLMCollator(BaseCollator):
     def _split_document(self, text: str) -> list[list[int]]:
         payload = self.max_seq_length - self.tokenizer.num_special_tokens_to_add(pair=False)
         ids = self.tokenizer(text, add_special_tokens=False)["input_ids"]
-        return [
+        chunks = [
             ids[index : index + payload]
             for index in range(0, len(ids), payload)
             if ids[index : index + payload]
         ]
+        if len(chunks) == 1 and len(ids) >= 2:
+            middle = len(ids) // 2
+            return [ids[:middle], ids[middle:]]
+        return chunks
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Tensor]:
         if self.paired:
