@@ -2,6 +2,21 @@
 
 All notable changes follow Keep a Changelog and Semantic Versioning.
 
+## [0.1.1] - 2026-08-17
+
+### Fixed
+
+- Split short coCondenser documents into two valid spans instead of rejecting them.
+- Restore coCondenser token-ID and automatic long-document span creation with Transformers 5.
+- Replace raw data-collator `KeyError` exceptions with actionable missing-column messages.
+- Keep internal package-metadata helpers out of the public `pretense` namespace.
+
+### Documentation
+
+- Make the README training quickstart self-contained and directly runnable.
+- Clarify that Hugging Face Datasets support requires the `examples` extra, while Python lists and
+  PyTorch datasets work with a core installation.
+
 ## [0.1.0] - 2026-08-16
 
 ### Added
