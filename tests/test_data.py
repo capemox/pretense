@@ -42,6 +42,46 @@ def test_cocondenser_collator_keeps_adjacent_pairs(tokenizer) -> None:
     assert (batch["labels"] != -100).any(dim=1).all()
 
 
+def test_cocondenser_collator_accepts_token_id_spans(tokenizer) -> None:
+    collator = MLMCollator(tokenizer, max_seq_length=12, spans_column="spans", paired=True)
+    spans = [
+        tokenizer("the quick fox", add_special_tokens=False)["input_ids"],
+        tokenizer("the lazy dog", add_special_tokens=False)["input_ids"],
+    ]
+
+    batch = collator([{"spans": spans}])
+
+    assert batch["input_ids"].shape[0] == 2
+    assert (batch["input_ids"][:, 0] == tokenizer.cls_token_id).all()
+    assert (batch["labels"] != -100).any(dim=1).all()
+
+
+def test_cocondenser_collator_accepts_long_automatically_chunked_documents(tokenizer) -> None:
+    collator = MLMCollator(tokenizer, max_seq_length=12, paired=True)
+
+    batch = collator([{"text": " ".join(["the"] * 20)}])
+
+    assert batch["input_ids"].shape == (2, 12)
+    assert (batch["input_ids"][:, 0] == tokenizer.cls_token_id).all()
+
+
+def test_cocondenser_collator_splits_short_documents_into_a_pair(tokenizer) -> None:
+    collator = MLMCollator(tokenizer, max_seq_length=12, paired=True)
+
+    batch = collator([{"text": "the quick brown fox"}])
+
+    assert batch["input_ids"].shape[0] == 2
+    assert (batch["input_ids"][:, 0] == tokenizer.cls_token_id).all()
+    assert (batch["labels"] != -100).any(dim=1).all()
+
+
+def test_cocondenser_collator_rejects_documents_that_cannot_form_two_spans(tokenizer) -> None:
+    collator = MLMCollator(tokenizer, max_seq_length=12, paired=True)
+
+    with pytest.raises(ValueError, match="at least two spans"):
+        collator([{"text": "the"}])
+
+
 def test_factory_selects_dupmae_bow(tokenizer) -> None:
     collator = build_collator(tokenizer, MethodConfig(name="dupmae"))
     assert isinstance(collator, MAECollator)
@@ -147,6 +187,37 @@ def test_factory_rejects_duplicate_or_overlapping_negative_columns(tokenizer) ->
         build_collator(tokenizer, method, negative_columns=("negative", "negative"))
     with pytest.raises(ValueError, match="differ from text columns"):
         build_collator(tokenizer, method, negative_columns=("text_pair",))
+
+
+@pytest.mark.parametrize(
+    ("collator", "example", "missing_column", "configuration_argument"),
+    [
+        (MAECollator, {"sentence": "the fox"}, "text", "text_column"),
+        (MNRLCollator, {"text": "the fox"}, "text_pair", "text_pair_column"),
+        (
+            ContrastiveCollator,
+            {"text": "the fox", "text_pair": "the dog"},
+            "label",
+            "label_column",
+        ),
+    ],
+)
+def test_collators_report_missing_columns(
+    collator, example, missing_column: str, configuration_argument: str, tokenizer
+) -> None:
+    with pytest.raises(ValueError) as raised:
+        collator(tokenizer)([example])
+
+    assert repr(missing_column) in str(raised.value)
+    assert configuration_argument in str(raised.value)
+    assert "Available columns" in str(raised.value)
+
+
+def test_supervised_simcse_reports_a_missing_pair_column(tokenizer) -> None:
+    collator = SimCSECollator(tokenizer, mode="supervised")
+
+    with pytest.raises(ValueError, match="'text_pair'.*text_pair_column"):
+        collator([{"text": "the fox"}])
 
 
 def test_unsupervised_simcse_duplicates_sentences_for_dropout_views(tokenizer) -> None:

@@ -33,8 +33,9 @@ Restoring a complete Trainer checkpoint, including optimizer and scheduler state
 Weights-only Pretense checkpoints use safetensors and remain loadable on every supported version.
 
 For development from a source checkout, use `uv sync --extra dev` instead.
-Install the optional Hugging Face Datasets dependency with `uv add "pretense[examples]"` when using
-the bundled examples.
+The core install accepts ordinary Python or PyTorch datasets without installing Hugging Face
+Datasets. To pass a `datasets.Dataset` directly or run the bundled examples, install the optional
+dependency with `uv add "pretense[examples]"`.
 
 ## Train with the Python SDK
 
@@ -55,6 +56,12 @@ model_name = "google-bert/bert-base-uncased"
 method = MethodConfig(name="retromae")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = load_pretraining_model(method, model_name)
+dataset = [
+    {"text": "Dense retrieval maps queries and passages into a shared embedding space."},
+    {"text": "Masked autoencoders learn representations by reconstructing corrupted text."},
+    {"text": "Sentence transformers produce reusable fixed-size text embeddings."},
+    {"text": "In-batch negatives make contrastive learning efficient."},
+]
 
 trainer = PretenseTrainer(
     model=model,
