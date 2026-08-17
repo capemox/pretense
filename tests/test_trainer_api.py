@@ -159,6 +159,16 @@ def test_direct_trainer_enforces_cocondenser_batch_invariants(tmp_path: Path) ->
     assert trainer.args.dataloader_drop_last is True
 
 
+def test_trainer_rejects_static_graph_cmnrl(tmp_path: Path) -> None:
+    model = create_pretraining_model(MethodConfig(name="cmnrl"), tiny_encoder(32))
+    args = PretenseTrainingArguments(output_dir=str(tmp_path), report_to="none")
+    # Transformers 5.0 did not yet expose this field on TrainingArguments, but later supported
+    # versions do. Setting it directly keeps the compatibility test valid across the full range.
+    args.ddp_static_graph = True  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="ddp_static_graph"):
+        PretenseTrainer(model=model, args=args)
+
+
 def test_trainer_drops_singleton_simcse_remainder(tmp_path: Path) -> None:
     model = create_pretraining_model(MethodConfig(name="simcse"), tiny_encoder(32))
     trainer = PretenseTrainer(

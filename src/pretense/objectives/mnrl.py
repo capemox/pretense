@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from functools import partial
 from typing import Literal
 
@@ -14,6 +14,7 @@ from torch.utils.checkpoint import get_device_states, set_device_states
 Similarity = Literal["cosine", "dot"]
 Encoder = Callable[[Tensor, Tensor], Tensor]
 Features = tuple[Tensor, Tensor]
+NoSync = Callable[[], AbstractContextManager[None]]
 
 
 def _gather_with_grad(value: Tensor) -> Tensor:
@@ -179,7 +180,13 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
             losses.append(chunk)
         return torch.stack(losses).sum()
 
-    def forward_cached(self, encode: Encoder, features: Sequence[Features]) -> Tensor:
+    def forward_cached(
+        self,
+        encode: Encoder,
+        features: Sequence[Features],
+        *,
+        no_sync: NoSync | None = None,
+    ) -> Tensor:
         if len(features) < 2:
             raise ValueError("CMNRL requires at least anchor and positive feature columns.")
         grad_enabled = torch.is_grad_enabled()
@@ -206,12 +213,19 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
                 features=features,
                 cache=cache,
                 random_states=random_states,
+                no_sync=no_sync,
             )
         )
         return deferred
 
-    def forward(self, encode: Encoder, features: Sequence[Features]) -> Tensor:  # type: ignore[override]
-        return self.forward_cached(encode, features)
+    def forward(  # type: ignore[override]
+        self,
+        encode: Encoder,
+        features: Sequence[Features],
+        *,
+        no_sync: NoSync | None = None,
+    ) -> Tensor:
+        return self.forward_cached(encode, features, no_sync=no_sync)
 
     def _reembed_backward(
         self,
@@ -221,19 +235,28 @@ class CachedMultipleNegativesRankingLoss(MultipleNegativesRankingLoss):
         features: Sequence[Features],
         cache: list[list[Tensor | None]],
         random_states: list[list[_RandContext]],
+        no_sync: NoSync | None,
     ) -> None:
+        replays_remaining = sum(len(column) for column in cache)
         with torch.enable_grad():
             for column, gradients, states in zip(features, cache, random_states, strict=True):
-                embeddings, _ = self._embed_column(
-                    encode,
-                    column,
-                    with_grad=True,
-                    random_states=states,
-                )
-                for embedding, gradient in zip(embeddings, gradients, strict=True):
+                input_ids, attention_mask = column
+                for index, begin in enumerate(
+                    range(0, input_ids.shape[0], self.mini_batch_size)
+                ):
+                    end = begin + self.mini_batch_size
+                    ids = input_ids[begin:end]
+                    mask = attention_mask[begin:end]
+                    gradient = gradients[index]
                     assert gradient is not None
-                    surrogate = (
-                        torch.dot(embedding.flatten().float(), gradient.flatten().float())
-                        * grad_output
-                    )
-                    surrogate.backward()
+                    replays_remaining -= 1
+                    sync = no_sync() if no_sync is not None and replays_remaining else nullcontext()
+                    with sync, states[index]:
+                        embedding = encode(ids, mask)
+                        surrogate = (
+                            torch.dot(
+                                embedding.flatten().float(), gradient.flatten().float()
+                            )
+                            * grad_output
+                        )
+                        surrogate.backward()

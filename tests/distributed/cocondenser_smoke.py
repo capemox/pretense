@@ -1,7 +1,9 @@
 """Two-process CPU smoke test, invoked explicitly by CI rather than pytest."""
 
 import os
+from copy import deepcopy
 from datetime import timedelta
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -14,6 +16,8 @@ from pretense import (
     ContrieverForPretraining,
     MethodConfig,
     MNRLForPretraining,
+    PretenseTrainer,
+    PretenseTrainingArguments,
     SimCSEForPretraining,
 )
 
@@ -27,6 +31,8 @@ def tiny_encoder() -> BertForMaskedLM:
             num_attention_heads=2,
             intermediate_size=32,
             max_position_embeddings=32,
+            hidden_dropout_prob=0.0,
+            attention_probs_dropout_prob=0.0,
         )
     )
 
@@ -87,33 +93,175 @@ def main() -> None:
     assert contriever.encoder.bert.embeddings.word_embeddings.weight.grad is not None
     stage("Contriever complete")
 
-    for model_class, method_name in (
-        (MNRLForPretraining, "mnrl"),
-        (CachedMNRLForPretraining, "cmnrl"),
-    ):
-        stage(f"{method_name.upper()} DDP setup")
-        ranking_model = model_class(
-            tiny_encoder(),
+    ranking_encoder = tiny_encoder()
+    anchor_ids = torch.randint(5, 30, (2, 8))
+    candidate_ids = torch.randint(5, 30, (2, 2, 8)) + rank % 2
+    ranking_inputs = {
+        "anchor_input_ids": anchor_ids,
+        "anchor_attention_mask": torch.ones_like(anchor_ids),
+        "candidate_input_ids": candidate_ids,
+        "candidate_attention_mask": torch.ones_like(candidate_ids),
+    }
+
+    configurations = (
+        (False, True, False),
+        (True, True, False),
+        (True, False, False),
+    )
+    for gather_across_devices, find_unused_parameters, static_graph in configurations:
+        suffix = (
+            f"gather={gather_across_devices}, unused={find_unused_parameters}, "
+            f"static={static_graph}"
+        )
+        stage(f"MNRL/CMNRL DDP equivalence setup ({suffix})")
+        mnrl = MNRLForPretraining(
+            deepcopy(ranking_encoder),
             MethodConfig(
-                name=method_name,
-                mnrl_gather_across_devices=True,
+                name="mnrl",
+                mnrl_gather_across_devices=gather_across_devices,
+            ),
+        )
+        distributed_mnrl = DistributedDataParallel(
+            mnrl,
+            find_unused_parameters=find_unused_parameters,
+            static_graph=static_graph,
+        )
+        mnrl_output = distributed_mnrl(**ranking_inputs)
+        mnrl_output.loss.backward()
+
+        cmnrl = CachedMNRLForPretraining(
+            deepcopy(ranking_encoder),
+            MethodConfig(
+                name="cmnrl",
+                mnrl_gather_across_devices=gather_across_devices,
                 cmnrl_mini_batch_size=1,
             ),
         )
-        distributed_ranking = DistributedDataParallel(ranking_model)
-        anchor_ids = torch.randint(5, 30, (2, 8))
-        candidate_ids = torch.randint(5, 30, (2, 2, 8)) + rank % 2
-        ranking_output = distributed_ranking(
-            anchor_input_ids=anchor_ids,
-            anchor_attention_mask=torch.ones_like(anchor_ids),
-            candidate_input_ids=candidate_ids,
-            candidate_attention_mask=torch.ones_like(candidate_ids),
+        cmnrl_trainer = PretenseTrainer(
+            model=cmnrl,
+            args=PretenseTrainingArguments(
+                output_dir=str(
+                    Path("/tmp")
+                    / f"pretense-cmnrl-{gather_across_devices}-{static_graph}-rank-{rank}"
+                ),
+                use_cpu=True,
+                report_to="none",
+            ),
         )
-        assert ranking_output.mnrl_loss is not None
-        assert torch.isfinite(ranking_output.mnrl_loss)
-        ranking_output.loss.backward()
-        assert ranking_model.encoder.bert.embeddings.word_embeddings.weight.grad is not None
-        stage(f"{method_name.upper()} complete")
+        distributed_cmnrl = DistributedDataParallel(
+            cmnrl,
+            find_unused_parameters=find_unused_parameters,
+            static_graph=static_graph,
+        )
+        cmnrl_loss, cmnrl_output = cmnrl_trainer.compute_loss(
+            distributed_cmnrl,
+            ranking_inputs,
+            return_outputs=True,
+        )
+        assert cmnrl_output.mnrl_loss is not None and torch.isfinite(cmnrl_loss)
+        cmnrl_loss.backward()
+
+        mnrl_gradients = {
+            name: parameter.grad
+            for name, parameter in mnrl.named_parameters()
+            if parameter.requires_grad
+        }
+        cmnrl_gradients = {
+            name: parameter.grad
+            for name, parameter in cmnrl.named_parameters()
+            if parameter.requires_grad
+        }
+        assert mnrl_gradients.keys() == cmnrl_gradients.keys()
+        for name in mnrl_gradients:
+            assert mnrl_gradients[name] is not None
+            assert cmnrl_gradients[name] is not None
+            torch.testing.assert_close(
+                cmnrl_gradients[name], mnrl_gradients[name], atol=2e-5, rtol=2e-5
+            )
+        stage(f"MNRL/CMNRL DDP gradients match ({suffix})")
+        try:
+            distributed_cmnrl(**ranking_inputs)
+        except RuntimeError as error:
+            assert "must be run through PretenseTrainer" in str(error)
+        else:
+            raise AssertionError(
+                "Direct distributed CMNRL should reject the unsafe backward path."
+            )
+
+    static_cmnrl = CachedMNRLForPretraining(
+        deepcopy(ranking_encoder),
+        MethodConfig(name="cmnrl", cmnrl_mini_batch_size=1),
+    )
+    static_trainer = PretenseTrainer(
+        model=static_cmnrl,
+        args=PretenseTrainingArguments(
+            output_dir=str(Path("/tmp") / f"pretense-cmnrl-static-rank-{rank}"),
+            use_cpu=True,
+            report_to="none",
+        ),
+    )
+    static_distributed_cmnrl = DistributedDataParallel(static_cmnrl, static_graph=True)
+    try:
+        static_trainer.compute_loss(static_distributed_cmnrl, ranking_inputs)
+    except ValueError as error:
+        assert "static-graph DDP" in str(error)
+    else:
+        raise AssertionError("CMNRL should reject static-graph DDP before backward.")
+
+    def ranking_collator(examples: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        return {
+            "anchor_input_ids": torch.stack(
+                [example["anchor_input_ids"] for example in examples]
+            ),
+            "anchor_attention_mask": torch.stack(
+                [example["anchor_attention_mask"] for example in examples]
+            ),
+            "candidate_input_ids": torch.stack(
+                [example["candidate_input_ids"] for example in examples]
+            ).transpose(0, 1),
+            "candidate_attention_mask": torch.stack(
+                [example["candidate_attention_mask"] for example in examples]
+            ).transpose(0, 1),
+        }
+
+    ranking_rows = [
+        {
+            "anchor_input_ids": anchor_ids[index % len(anchor_ids)],
+            "anchor_attention_mask": torch.ones_like(anchor_ids[index % len(anchor_ids)]),
+            "candidate_input_ids": candidate_ids[:, index % candidate_ids.shape[1]],
+            "candidate_attention_mask": torch.ones_like(
+                candidate_ids[:, index % candidate_ids.shape[1]]
+            ),
+        }
+        for index in range(8)
+    ]
+    end_to_end_trainer = PretenseTrainer(
+        model=CachedMNRLForPretraining(
+            deepcopy(ranking_encoder),
+            MethodConfig(
+                name="cmnrl",
+                mnrl_gather_across_devices=True,
+                cmnrl_mini_batch_size=1,
+            ),
+        ),
+        args=PretenseTrainingArguments(
+            output_dir=str(Path("/tmp") / f"pretense-cmnrl-train-rank-{rank}"),
+            use_cpu=True,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=2,
+            max_steps=1,
+            save_strategy="no",
+            logging_strategy="no",
+            ddp_find_unused_parameters=True,
+            disable_tqdm=True,
+            report_to="none",
+        ),
+        train_dataset=ranking_rows,
+        data_collator=ranking_collator,
+    )
+    end_to_end_trainer.train()
+    assert end_to_end_trainer.state.global_step == 1
+    stage("CMNRL PretenseTrainer DDP step complete")
 
     stage("SimCSE DDP setup")
     simcse = SimCSEForPretraining(tiny_encoder(), MethodConfig(name="simcse"))

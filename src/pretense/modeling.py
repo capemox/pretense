@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -749,11 +751,44 @@ class CachedMNRLForPretraining(_MNRLForPretraining):
         self,
         anchor_input_ids: Tensor,
         anchor_attention_mask: Tensor,
+        candidate_input_ids: Tensor | None = None,
+        candidate_attention_mask: Tensor | None = None,
+        cmnrl_encode_only: bool = False,
+        **kwargs: Tensor,
+    ) -> PretensePretrainingOutput | Tensor:
+        del kwargs
+        if cmnrl_encode_only:
+            return self._mean_encode(anchor_input_ids, anchor_attention_mask)
+        if candidate_input_ids is None or candidate_attention_mask is None:
+            raise ValueError("CMNRL requires candidate input IDs and attention masks.")
+        if (
+            self.training
+            and torch.is_grad_enabled()
+            and dist.is_available()
+            and dist.is_initialized()
+            and dist.get_world_size() > 1
+        ):
+            raise RuntimeError(
+                "Distributed CMNRL must be run through PretenseTrainer so every GradCache "
+                "re-embedding pass goes through the distributed model wrapper."
+            )
+        return self.cached_loss(
+            self._mean_encode,
+            anchor_input_ids,
+            anchor_attention_mask,
+            candidate_input_ids,
+            candidate_attention_mask,
+        )
+
+    def cached_loss(
+        self,
+        encode: Callable[[Tensor, Tensor], Tensor],
+        anchor_input_ids: Tensor,
+        anchor_attention_mask: Tensor,
         candidate_input_ids: Tensor,
         candidate_attention_mask: Tensor,
-        **kwargs: Tensor,
+        no_sync: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> PretensePretrainingOutput:
-        del kwargs
         self._validate_candidates(
             anchor_input_ids, candidate_input_ids, candidate_attention_mask
         )
@@ -761,7 +796,7 @@ class CachedMNRLForPretraining(_MNRLForPretraining):
         features.extend(
             zip(candidate_input_ids, candidate_attention_mask, strict=True)
         )
-        mnrl_loss = self.objective(self._mean_encode, features)
+        mnrl_loss = self.objective(encode, features, no_sync=no_sync)
         return PretensePretrainingOutput(loss=mnrl_loss, mnrl_loss=mnrl_loss)
 
 

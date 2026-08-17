@@ -11,7 +11,7 @@ from transformers.trainer import TRAINING_ARGS_NAME
 from transformers.trainer_utils import EvalPrediction
 
 from .data import SimCSECollator, build_collator
-from .modeling import PretensePretrainingModel
+from .modeling import CachedMNRLForPretraining, PretensePretrainingModel
 
 
 class PretenseTrainer(Trainer):
@@ -117,6 +117,13 @@ class PretenseTrainer(Trainer):
                     and dataset_size % batch_size == 1
                 ):
                     self.args.dataloader_drop_last = True
+        if self.model.method_config.name == "cmnrl" and getattr(
+            self.args, "ddp_static_graph", False
+        ):
+            raise ValueError(
+                "CMNRL is incompatible with ddp_static_graph=True because GradCache replays "
+                "multiple mini-batch forward/backward pairs. Leave ddp_static_graph disabled."
+            )
         # MNRL, CMNRL, and Contriever compute a loss without a field named ``labels``. Generic
         # Trainer inference otherwise treats those batches as prediction-only and omits eval_loss.
         self.can_return_loss = True
@@ -128,13 +135,42 @@ class PretenseTrainer(Trainer):
         return_outputs: bool = False,
         num_items_in_batch: torch.Tensor | int | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, Any]:
-        result = super().compute_loss(
-            model,
-            inputs,
-            return_outputs=True,
-            num_items_in_batch=num_items_in_batch,
-        )
-        loss, outputs = result
+        if isinstance(self.model, CachedMNRLForPretraining):
+            if getattr(model, "static_graph", False):
+                raise ValueError(
+                    "CMNRL is incompatible with a static-graph DDP wrapper. Leave "
+                    "ddp_static_graph disabled."
+                )
+
+            def encode(input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+                embedding = model(
+                    anchor_input_ids=input_ids,
+                    anchor_attention_mask=attention_mask,
+                    cmnrl_encode_only=True,
+                )
+                if not isinstance(embedding, torch.Tensor):  # pragma: no cover - invariant
+                    raise TypeError("The CMNRL encoding pass must return a tensor.")
+                return embedding
+
+            outputs = self.model.cached_loss(
+                encode,
+                inputs["anchor_input_ids"],
+                inputs["anchor_attention_mask"],
+                inputs["candidate_input_ids"],
+                inputs["candidate_attention_mask"],
+                no_sync=getattr(model, "no_sync", None),
+            )
+            loss = outputs.loss
+            if loss is None:  # pragma: no cover - invariant
+                raise RuntimeError("CMNRL did not return a loss.")
+        else:
+            result = super().compute_loss(
+                model,
+                inputs,
+                return_outputs=True,
+                num_items_in_batch=num_items_in_batch,
+            )
+            loss, outputs = result
         if model.training:
             self._component_loss_batches += 1
             for name in self._component_loss_names:
