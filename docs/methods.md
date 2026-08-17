@@ -213,6 +213,11 @@ as ordinary MNRL without communicating after every mini-batch. Leave `ddp_static
 PyTorch's static-graph reducer is incompatible with GradCache's repeated forward/backward pairs,
 and `PretenseTrainer` rejects that combination explicitly.
 
+> **Behavioral change in 0.1.1:** single-process direct use of
+> `CachedMNRLForPretraining` is unchanged. Directly wrapping that model in DDP now raises an error;
+> distributed CMNRL must be driven through `PretenseTrainer` so gradient synchronization remains
+> correct.
+
 The data should not repeat a positive (or a query that is also another row's positive) within the
 same batch unless that collision is genuinely negative. MNRL cannot distinguish such false
 negatives. Pretense does not silently deduplicate rows because doing so would change user-supplied
