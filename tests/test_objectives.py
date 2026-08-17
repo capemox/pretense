@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
 
 import pytest
@@ -90,6 +92,30 @@ def test_cached_mnrl_matches_loss_and_parameter_gradients() -> None:
     assert torch.allclose(cached_loss, regular_loss.detach(), atol=1e-6)
     for expected, actual in zip(encoder.parameters(), cached_encoder.parameters(), strict=True):
         assert torch.allclose(actual.grad, expected.grad, atol=1e-6)
+
+
+def test_cached_mnrl_synchronizes_only_the_final_replay() -> None:
+    encoder = torch.nn.Linear(4, 4)
+    columns = [torch.randn(5, 4) for _ in range(3)]
+    masks = [torch.ones(5, 1) for _ in columns]
+    no_sync_calls = 0
+
+    @contextmanager
+    def no_sync() -> Iterator[None]:
+        nonlocal no_sync_calls
+        no_sync_calls += 1
+        yield
+
+    loss = CachedMultipleNegativesRankingLoss(mini_batch_size=2)(
+        lambda values, mask: encoder(values),
+        list(zip(columns, masks, strict=True)),
+        no_sync=no_sync,
+    )
+    loss.backward()
+
+    # Three columns split into three mini-batches produce nine replay passes. The first eight
+    # suppress DDP synchronization; the final replay reduces all accumulated gradients once.
+    assert no_sync_calls == 8
 
 
 def test_cached_mnrl_replays_dropout_randomness() -> None:

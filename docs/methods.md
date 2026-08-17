@@ -205,6 +205,19 @@ Here `256` determines the local in-batch candidate pool, while `32` bounds encod
 memory. CMNRL performs an extra no-gradient encoding pass and is therefore slower than ordinary
 MNRL when both fit in memory. It preserves dropout randomness during the gradient replay.
 
+With distributed training, use `PretenseTrainer` rather than wrapping and calling
+`CachedMNRLForPretraining` directly. The trainer sends every re-embedding pass through the wrapped
+model, suppresses gradient synchronization for the intermediate mini-batches, and synchronizes the
+complete accumulated gradient on the final replay. This gives CMNRL the same distributed gradients
+as ordinary MNRL without communicating after every mini-batch. Leave `ddp_static_graph` disabled:
+PyTorch's static-graph reducer is incompatible with GradCache's repeated forward/backward pairs,
+and `PretenseTrainer` rejects that combination explicitly.
+
+> **Behavioral change in 0.1.1:** single-process direct use of
+> `CachedMNRLForPretraining` is unchanged. Directly wrapping that model in DDP now raises an error;
+> distributed CMNRL must be driven through `PretenseTrainer` so gradient synchronization remains
+> correct.
+
 The data should not repeat a positive (or a query that is also another row's positive) within the
 same batch unless that collision is genuinely negative. MNRL cannot distinguish such false
 negatives. Pretense does not silently deduplicate rows because doing so would change user-supplied

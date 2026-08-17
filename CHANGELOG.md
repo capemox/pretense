@@ -10,6 +10,8 @@ All notable changes follow Keep a Changelog and Semantic Versioning.
 - Restore coCondenser token-ID and automatic long-document span creation with Transformers 5.
 - Replace raw data-collator `KeyError` exceptions with actionable missing-column messages.
 - Keep internal package-metadata helpers out of the public `pretense` namespace.
+- Make CMNRL distributed training gradient-equivalent to MNRL by replaying mini-batches through the
+  wrapped model and synchronizing their accumulated gradients exactly once.
 
 ### Documentation
 
