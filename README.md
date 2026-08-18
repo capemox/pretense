@@ -1,5 +1,10 @@
 # Pretense
 
+[![CI](https://img.shields.io/github/actions/workflow/status/capemox/pretense/ci.yml?branch=main&logo=github&style=flat&label=CI)](https://github.com/capemox/pretense/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/pretense?logo=pypi&style=flat&color=blue)](https://pypi.org/project/pretense/)
+[![Python](https://img.shields.io/pypi/pyversions/pretense?logo=python&style=flat)](https://pypi.org/project/pretense/)
+[![GitHub - License](https://img.shields.io/github/license/capemox/pretense?logo=github&style=flat&color=green)](LICENSE)
+
 Pretraining sentence transformers with retrieval-oriented objectives.
 
 Pretense supports:
